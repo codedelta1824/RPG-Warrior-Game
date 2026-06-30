@@ -1,6 +1,7 @@
 import pygame
 import os
 import random
+import math
 from src.config import (
     WIDTH, HEIGHT, PAUSE_BUTTON_POS, PAUSE_BUTTON_RADIUS,
     MENU_RECT, MP_MENU_RECT, MP_HOST_BTN, MP_INPUT_BOX, MP_JOIN_BTN,
@@ -15,8 +16,57 @@ from src.player import (
     left_idle_frames, left_walk_frames, left_attack_frames,
     left_defend_frames, left_jump_frames, right_idle_frames,
     right_walk_frames, right_attack_frames, right_defend_frames,
-    right_jump_frames
+    right_jump_frames, Bot
 )
+
+class LavaDrop:
+    """Animated lava drop particle for menu background."""
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.velocity = random.uniform(0.8, 1.3)  # Falling speed
+        self.size = random.randint(8, 16)  # Drop size
+        self.lifetime = 0
+        # Calculate max_lifetime so drop disappears around y=300 (button area)
+        self.max_lifetime = int((300 - y) / self.velocity) + random.randint(-20, 20)
+        self.wobble = random.uniform(-0.2, 0.2)  # Horizontal drift
+        self.wobble_speed = random.uniform(0.02, 0.05)
+        self.wobble_offset = random.uniform(0, 3.14)
+    
+    def update(self):
+        """Update drop position and animation."""
+        self.y += self.velocity
+        self.x += self.wobble
+        self.wobble = 2 * math.sin(self.lifetime * self.wobble_speed + self.wobble_offset)
+        self.lifetime += 1
+        return self.lifetime < self.max_lifetime
+    
+    def draw(self, surface):
+        """Draw the lava drop with glow effect."""
+        if self.lifetime > self.max_lifetime:
+            return
+        
+        # Fade out at the end
+        alpha_factor = 1 - (self.lifetime / self.max_lifetime)
+        
+        # Draw glow (outer bright orange)
+        glow_size = int(self.size * 1.8)
+        glow_color = (255, 150, 0, int(80 * alpha_factor))
+        glow_surf = pygame.Surface((glow_size * 2, glow_size * 2), pygame.SRCALPHA)
+        pygame.draw.circle(glow_surf, glow_color, (glow_size, glow_size), glow_size)
+        surface.blit(glow_surf, (int(self.x - glow_size), int(self.y - glow_size)))
+        
+        # Draw main drop (bright orange)
+        main_color = (255, 180, 50, int(220 * alpha_factor))
+        main_surf = pygame.Surface((self.size * 2, self.size * 2), pygame.SRCALPHA)
+        pygame.draw.circle(main_surf, main_color, (self.size, self.size), self.size)
+        surface.blit(main_surf, (int(self.x - self.size), int(self.y - self.size)))
+        
+        # Draw bright core
+        core_color = (255, 220, 100, int(255 * alpha_factor))
+        core_surf = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        pygame.draw.circle(core_surf, core_color, (self.size // 2, self.size // 2), max(1, self.size // 3))
+        surface.blit(core_surf, (int(self.x - self.size // 2), int(self.y - self.size // 2)))
 
 def _find_avatar_path(filename):
     filename_lower = filename.lower()
@@ -74,12 +124,59 @@ def load_full_avatar(filename, size=(140, 140)):
 avatar_left = load_full_avatar("avatar.jfif", size=(140, 140))
 avatar_right = load_full_avatar("avatar2.jfif", size=(140, 140))
 
-def draw_main_menu(surface, buttons):
+def draw_ornate_button(surface, rect, label, mouse_pos, font=None):
+    """Draw an ornate medieval-style button with decorative borders."""
+    if font is None:
+        font = FONT
+    is_hovered = rect.collidepoint(mouse_pos)
+    
+    # Create button surface with alpha
+    btn_surf = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+    
+    # Base stone color - darker when not hovered, slightly lighter when hovered
+    base_color = (45, 42, 38) if not is_hovered else (55, 50, 45)
+    
+    # Draw main button background
+    pygame.draw.rect(btn_surf, (*base_color, 220), (0, 0, rect.width, rect.height), border_radius=16)
+    
+    # Draw ornate outer border (gold/brass effect)
+    pygame.draw.rect(btn_surf, (184, 152, 75), (0, 0, rect.width, rect.height), width=4, border_radius=16)
+    
+    # Draw inner darker border for depth
+    pygame.draw.rect(btn_surf, (100, 85, 50), (4, 4, rect.width - 8, rect.height - 8), width=2, border_radius=12)
+    
+    # Add decorative corner circles (ornate frame effect)
+    corner_radius = 12
+    corners = [
+        (corner_radius, corner_radius),
+        (rect.width - corner_radius, corner_radius),
+        (corner_radius, rect.height - corner_radius),
+        (rect.width - corner_radius, rect.height - corner_radius)
+    ]
+    for cx, cy in corners:
+        pygame.draw.circle(btn_surf, (184, 152, 75), (cx, cy), 6)
+        pygame.draw.circle(btn_surf, (100, 85, 50), (cx, cy), 3)
+    
+    # Draw subtle shadow/depth on bottom and right
+    pygame.draw.line(btn_surf, (20, 18, 15), (0, rect.height - 1), (rect.width, rect.height - 1), width=2)
+    pygame.draw.line(btn_surf, (20, 18, 15), (rect.width - 1, 0), (rect.width - 1, rect.height), width=2)
+    
+    # Draw highlight on top and left
+    pygame.draw.line(btn_surf, (100, 90, 60), (0, 0), (rect.width, 0), width=1)
+    pygame.draw.line(btn_surf, (100, 90, 60), (0, 0), (0, rect.height), width=1)
+    
+    surface.blit(btn_surf, (rect.x, rect.y))
+    
+    # Draw text in gold/brass color
+    txt = font.render(label.upper(), True, (255, 223, 128))
+    surface.blit(txt, (rect.centerx - txt.get_width() // 2, rect.centery - txt.get_height() // 2))
+
+def draw_main_menu(surface, buttons, lava_drops):
     from src.player import menu_background
 
     surface.blit(menu_background, (0, 0))
 
-    title_path = os.path.join('assets', 'images', 'Game Title', 'Blade Clash Runner Game Title.png')
+    title_path = os.path.join('assets', 'images', 'Game Title', 'Blade Clash Arena Game Title.png')
     if os.path.exists(title_path):
         try:
             title_image = pygame.image.load(title_path).convert_alpha()
@@ -90,16 +187,13 @@ def draw_main_menu(surface, buttons):
         except Exception:
             pass
 
+    # Draw lava drops
+    for drop in lava_drops:
+        drop.draw(surface)
+
+    mouse_pos = pygame.mouse.get_pos()
     for btn_rect, label in buttons:
-        mouse_pos = pygame.mouse.get_pos()
-        bg_color = (55, 55, 75) if btn_rect.collidepoint(mouse_pos) else (35, 35, 55)
-
-        btn_surf = pygame.Surface((btn_rect.width, btn_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(btn_surf, (*bg_color, 160), (0, 0, btn_rect.width, btn_rect.height), border_radius=BUTTON_BORDER_RADIUS)
-        surface.blit(btn_surf, (btn_rect.x, btn_rect.y))
-
-        txt = FONT.render(label, True, (255, 255, 255))
-        surface.blit(txt, (btn_rect.centerx - txt.get_width() // 2, btn_rect.centery - txt.get_height() // 2))
+        draw_ornate_button(surface, btn_rect, label, mouse_pos)
 
 
 def draw_control_card(surface, rect, icon_surface, title, key_label, active=False):
@@ -175,11 +269,9 @@ def draw_pause_menu(surface):
 
     for i, opt in enumerate(options):
         opt_rect = pygame.Rect(MENU_RECT.x + 25, MENU_RECT.y + 90 + i * 65, MENU_RECT.width - 50, 45)
-        bg_color = (50, 50, 70) if opt_rect.collidepoint(mouse_pos) else (30, 30, 30)
-
-        pygame.draw.rect(surface, bg_color, opt_rect, border_radius=8)
-        txt = SMALL_FONT.render(opt, True, (255, 255, 255))
-        surface.blit(txt, (opt_rect.centerx - txt.get_width() // 2, opt_rect.centery - txt.get_height() // 2))
+        
+        # Draw ornate buttons for pause menu
+        draw_ornate_button(surface, opt_rect, opt, mouse_pos, SMALL_FONT)
 
 def draw_background_changer_menu(surface, local_index):
     from src.player import available_backgrounds
@@ -215,25 +307,11 @@ def draw_background_changer_menu(surface, local_index):
 
     mouse_pos = pygame.mouse.get_pos()
 
-    left_color = (80, 80, 100) if BG_SLIDE_LEFT_BTN.collidepoint(mouse_pos) else (30, 30, 35)
-    right_color = (80, 80, 100) if BG_SLIDE_RIGHT_BTN.collidepoint(mouse_pos) else (30, 30, 35)
-    select_color = (0, 150, 200) if BG_SELECT_BTN.collidepoint(mouse_pos) else (0, 100, 150)
-    back_color = (150, 40, 40) if BG_BACK_BTN.collidepoint(mouse_pos) else (100, 20, 20)
-
-    pygame.draw.rect(surface, left_color, BG_SLIDE_LEFT_BTN, border_radius=8)
-    pygame.draw.rect(surface, right_color, BG_SLIDE_RIGHT_BTN, border_radius=8)
-    pygame.draw.rect(surface, select_color, BG_SELECT_BTN, border_radius=10)
-    pygame.draw.rect(surface, back_color, BG_BACK_BTN, border_radius=10)
-
-    lbl_l = FONT.render("<", True, (255, 255, 255))
-    lbl_r = FONT.render(">", True, (255, 255, 255))
-    lbl_s = FONT.render("APPLY BACKGROUND", True, (255, 255, 255))
-    lbl_b = SMALL_FONT.render("SAVE & RETURN", True, (255, 255, 255))
-
-    surface.blit(lbl_l, (BG_SLIDE_LEFT_BTN.centerx - lbl_l.get_width() // 2, BG_SLIDE_LEFT_BTN.centery - lbl_l.get_height() // 2))
-    surface.blit(lbl_r, (BG_SLIDE_RIGHT_BTN.centerx - lbl_r.get_width() // 2, BG_SLIDE_RIGHT_BTN.centery - lbl_r.get_height() // 2))
-    surface.blit(lbl_s, (BG_SELECT_BTN.centerx - lbl_s.get_width() // 2, BG_SELECT_BTN.centery - lbl_s.get_height() // 2))
-    surface.blit(lbl_b, (BG_BACK_BTN.centerx - lbl_b.get_width() // 2, BG_BACK_BTN.centery - lbl_b.get_height() // 2))
+    # Draw ornate buttons for background menu
+    draw_ornate_button(surface, BG_SLIDE_LEFT_BTN, "<", mouse_pos, FONT)
+    draw_ornate_button(surface, BG_SLIDE_RIGHT_BTN, ">", mouse_pos, FONT)
+    draw_ornate_button(surface, BG_SELECT_BTN, "APPLY BACKGROUND", mouse_pos, FONT)
+    draw_ornate_button(surface, BG_BACK_BTN, "SAVE & RETURN", mouse_pos, SMALL_FONT)
 
 def draw_multiplayer_menu(surface, room_code, input_text, is_active, status_msg):
     pygame.draw.rect(surface, (24, 24, 28), MP_MENU_RECT, border_radius=16)
@@ -244,10 +322,8 @@ def draw_multiplayer_menu(surface, room_code, input_text, is_active, status_msg)
 
     mouse = pygame.mouse.get_pos()
 
-    bg_h = (40, 80, 40) if MP_HOST_BTN.collidepoint(mouse) else (20, 50, 20)
-    pygame.draw.rect(surface, bg_h, MP_HOST_BTN, border_radius=8)
-    lbl_h = SMALL_FONT.render("HOST GAME ROOM", True, (255, 255, 255))
-    surface.blit(lbl_h, (MP_HOST_BTN.centerx - lbl_h.get_width() // 2, MP_HOST_BTN.centery - lbl_h.get_height() // 2))
+    # Draw ornate buttons for multiplayer menu
+    draw_ornate_button(surface, MP_HOST_BTN, "HOST GAME ROOM", mouse, SMALL_FONT)
 
     bg_box = (40, 40, 45) if is_active else (25, 25, 28)
     border_c = (0, 180, 255) if is_active else (70, 70, 80)
@@ -264,15 +340,9 @@ def draw_multiplayer_menu(surface, room_code, input_text, is_active, status_msg)
     status_lbl = SMALL_FONT.render(f"STATUS: {status_msg}", True, (0, 255, 255))
     surface.blit(status_lbl, (MP_MENU_RECT.centerx - status_lbl.get_width() // 2, MP_MENU_RECT.y + 340))
 
-    bg_j = (40, 40, 80) if MP_JOIN_BTN.collidepoint(mouse) else (25, 25, 50)
-    pygame.draw.rect(surface, bg_j, MP_JOIN_BTN, border_radius=8)
-    lbl_j = SMALL_FONT.render("JOIN ROOM MATCH", True, (255, 255, 255))
-    surface.blit(lbl_j, (MP_JOIN_BTN.centerx - lbl_j.get_width() // 2, MP_JOIN_BTN.centery - lbl_j.get_height() // 2))
-
-    bg_b = (100, 30, 30) if MP_BACK_BTN.collidepoint(mouse) else (60, 20, 20)
-    pygame.draw.rect(surface, bg_b, MP_BACK_BTN, border_radius=8)
-    lbl_b = SMALL_FONT.render("BACK TO MENU", True, (255, 255, 255))
-    surface.blit(lbl_b, (MP_BACK_BTN.centerx - lbl_b.get_width() // 2, MP_BACK_BTN.centery - lbl_b.get_height() // 2))
+    # Draw ornate buttons for join and back
+    draw_ornate_button(surface, MP_JOIN_BTN, "JOIN ROOM MATCH", mouse, SMALL_FONT)
+    draw_ornate_button(surface, MP_BACK_BTN, "BACK TO MENU", mouse, SMALL_FONT)
 
 def draw_health_bars(surface, hp1, sh1, hp2, sh2, name1="Player 1", name2="Player 2"):
     small_radius = int(PAUSE_BUTTON_RADIUS * 0.75)
@@ -349,6 +419,15 @@ class UIManager:
         ]
 
         self.background_index = current_bg_index
+        
+        # Single player mode variables
+        self.single_player_mode = False
+        self.current_round = 1
+        self.bot = None
+        
+        # Initialize lava drops for menu animation
+        self.lava_drops = []
+        self.lava_drop_timer = 0
 
     def _build_main_menu_buttons(self):
         labels = [
@@ -385,6 +464,8 @@ class UIManager:
                 self.state = GameState.MAIN_MENU
             elif self.state == GameState.NAME_INPUT:
                 self._handle_name_input_mouse(mouse_pos, player1, player2)
+            elif self.state == GameState.SINGLE_PLAYER_NAME_INPUT:
+                self._handle_single_player_name_input_mouse(mouse_pos, player1, player2)
             elif self.state == GameState.MULTIPLAYER_MENU:
                 self._handle_multiplayer_menu_mouse(mouse_pos, player1, player2, net)
             elif self.state == GameState.BACKGROUND_MENU:
@@ -418,6 +499,11 @@ class UIManager:
                     self.active_mp_input = False
                     self.status_msg = "Enter names and start your local duel."
                     self.state = GameState.NAME_INPUT
+                elif label == "SINGLE PLAYER":
+                    self.player1_name = "Player"
+                    self.active_box = 'sp_name'
+                    self.status_msg = "Enter your name for single player mode."
+                    self.state = GameState.SINGLE_PLAYER_NAME_INPUT
                 elif label == "MULTIPLAYER (LAN)":
                     self.mp_role = None
                     self.generated_code = ""
@@ -586,6 +672,16 @@ class UIManager:
                     if len(self.player2_name) < 14 and event.unicode.isprintable():
                         self.player2_name += event.unicode
 
+        elif self.state == GameState.SINGLE_PLAYER_NAME_INPUT:
+            if self.active_box == 'sp_name':
+                if event.key == pygame.K_BACKSPACE:
+                    self.player1_name = self.player1_name[:-1]
+                elif event.key == pygame.K_RETURN:
+                    self.active_box = None
+                else:
+                    if len(self.player1_name) < 14 and event.unicode.isprintable():
+                        self.player1_name += event.unicode
+
         elif self.state == GameState.MULTIPLAYER_MENU and self.active_mp_input:
             if event.key == pygame.K_BACKSPACE:
                 self.inputted_code = self.inputted_code[:-1]
@@ -601,7 +697,7 @@ class UIManager:
                 self.state = GameState.PLAYING
             elif self.state == GameState.OPTIONS:
                 self.state = GameState.PAUSED
-            elif self.state in (GameState.MULTIPLAYER_MENU, GameState.HOW_TO_PLAY, GameState.AVATAR_MENU):
+            elif self.state in (GameState.MULTIPLAYER_MENU, GameState.HOW_TO_PLAY, GameState.AVATAR_MENU, GameState.SINGLE_PLAYER_NAME_INPUT):
                 self.state = GameState.MAIN_MENU
 
         if self.state == GameState.GAME_OVER and event.key != pygame.K_ESCAPE:
@@ -639,10 +735,26 @@ class UIManager:
             self.state = GameState.GAME_OVER
 
     def render(self, surface, mouse_pos, player1, player2, clock):
+        # Update and spawn lava drops for main menu
         if self.state == GameState.MAIN_MENU:
-            draw_main_menu(surface, self.main_menu_buttons)
+            self.lava_drop_timer += 1
+            # Spawn new drops every 6 frames
+            if self.lava_drop_timer > 6:
+                spawn_x = random.randint(0, WIDTH)
+                # Spawn from top of title area (y=24 to y=150)
+                spawn_y = random.randint(24, 150)
+                self.lava_drops.append(LavaDrop(spawn_x, spawn_y))
+                self.lava_drop_timer = 0
+            
+            # Update existing drops and remove dead ones
+            self.lava_drops = [drop for drop in self.lava_drops if drop.update()]
+        
+        if self.state == GameState.MAIN_MENU:
+            draw_main_menu(surface, self.main_menu_buttons, self.lava_drops)
         elif self.state == GameState.NAME_INPUT:
             self._draw_name_input(surface, mouse_pos)
+        elif self.state == GameState.SINGLE_PLAYER_NAME_INPUT:
+            self._draw_single_player_name_input(surface, mouse_pos)
         elif self.state == GameState.MULTIPLAYER_MENU:
             self._draw_multiplayer_menu(surface)
         elif self.state == GameState.BACKGROUND_MENU:
@@ -699,12 +811,9 @@ class UIManager:
         surface.blit(txt_surf2, (p2_box.x + 12, p2_box.y + 9))
 
         continue_btn = pygame.Rect(panel_x + (panel_w - 240) // 2, panel_y + panel_h - 75, 240, 45)
-        btn_hover = continue_btn.collidepoint(mouse_pos)
-        btn_color = (40, 175, 95) if btn_hover else (30, 145, 75)
-        pygame.draw.rect(surface, btn_color, continue_btn, border_radius=8)
-
-        text_btn = font_btn.render("CONTINUE", True, (255, 255, 255))
-        surface.blit(text_btn, text_btn.get_rect(center=continue_btn.center))
+        
+        # Draw ornate continue button
+        draw_ornate_button(surface, continue_btn, "CONTINUE", mouse_pos, font_btn)
 
     def _draw_multiplayer_menu(self, surface):
         surface.fill((15, 15, 18))
@@ -749,13 +858,13 @@ class UIManager:
             surface.blit(status_surf, (item_rect.x + 20, item_rect.y + item_h - 50))
 
         back_btn = pygame.Rect(BG_MENU_RECT.centerx - 100, BG_MENU_RECT.bottom - 90, 200, 50)
-        btn_color = (60, 130, 240) if back_btn.collidepoint(pygame.mouse.get_pos()) else (45, 105, 215)
-        pygame.draw.rect(surface, btn_color, back_btn, border_radius=10)
+        mouse_pos = pygame.mouse.get_pos()
+        
+        # Draw ornate back button
+        draw_ornate_button(surface, back_btn, "BACK TO MENU", mouse_pos, SMALL_FONT)
+        
         instruction = SMALL_FONT.render("CLICK TO GO TO MENU OR PRESS ESC", True, (200, 200, 200))
         surface.blit(instruction, (BG_MENU_RECT.centerx - instruction.get_width() // 2, BG_MENU_RECT.bottom - 130))
-
-        btn_txt = SMALL_FONT.render("BACK TO MENU", True, (255, 255, 255))
-        surface.blit(btn_txt, btn_txt.get_rect(center=back_btn.center))
 
     def _draw_game_screen(self, surface, player1, player2):
         from src.player import game_background
