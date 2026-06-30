@@ -4,6 +4,7 @@ class GameState(Enum):
     """Tracks the top-level screens and gameplay modes."""
     MAIN_MENU = auto()
     NAME_INPUT = auto()
+    SINGLE_PLAYER_NAME_INPUT = auto()
     MULTIPLAYER_MENU = auto()
     PLAYING = auto()
     PAUSED = auto()
@@ -12,3 +13,4 @@ class GameState(Enum):
     BACKGROUND_MENU = auto()
     AVATAR_MENU = auto()
     GAME_OVER = auto()
+    ROUND_RESULT = auto()
