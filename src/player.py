@@ -303,3 +303,106 @@ class Player:
                 sprite_to_draw = pygame.transform.flip(sprite_to_draw, True, False)
 
             surface.blit(sprite_to_draw, (self.x, self.y))
+
+
+class Bot(Player):
+    """AI bot player for single player mode with difficulty progression."""
+    def __init__(self, x, y, side="left", difficulty_round=1):
+        super().__init__(x, y, side)
+        self.difficulty_round = difficulty_round
+        self.ai_action_timer = 0
+        self.ai_decision_timer = 0
+        self.ai_current_action = "idle"
+        self.set_difficulty(difficulty_round)
+    
+    def set_difficulty(self, round_num):
+        """Set bot difficulty based on round number (1-3)."""
+        self.difficulty_round = round_num
+        if round_num == 1:
+            self.attack_speed = 0.45  # Default attack speed
+            self.speed = 5  # Slightly slower than player (6)
+            self.ai_aggressiveness = 0.4  # 40% chance to attack
+        elif round_num == 2:
+            self.attack_speed = 0.35  # Faster attack
+            self.speed = 5.5  # Medium speed
+            self.ai_aggressiveness = 0.6  # 60% chance to attack
+        else:  # round_num == 3
+            self.attack_speed = 0.3  # Even faster attack
+            self.speed = 6  # Same as player
+            self.ai_aggressiveness = 0.75  # 75% chance to attack
+    
+    def update(self, keys, opponent):
+        """AI controlled update instead of keyboard input."""
+        import random
+        
+        self.state = "idle"
+        self.ai_decision_timer += 1
+        
+        # Make AI decisions every 30 frames (0.5 seconds)
+        if self.ai_decision_timer > 30:
+            self.ai_decision_timer = 0
+            # Random action selection
+            rand = random.random()
+            if rand < self.ai_aggressiveness:
+                self.ai_current_action = "attack"
+            elif rand < 0.5 + self.ai_aggressiveness / 2:
+                self.ai_current_action = "move"
+            else:
+                self.ai_current_action = "idle"
+        
+        # Execute AI action
+        if self.ai_current_action == "move":
+            # Move towards opponent
+            if self.x < opponent.x - 150:
+                self.x += self.speed
+                self.state = "walk"
+            elif self.x > opponent.x + 150:
+                self.x -= self.speed
+                self.state = "walk"
+        
+        elif self.ai_current_action == "attack":
+            self.state = "attack"
+            self.attack_hold_time += 1 / 60
+            
+            if self.attack_hold_time >= self.attack_speed:
+                my_attack_rect = self.get_attack_rect(opponent.x)
+                opp_hitbox = opponent.get_hitbox()
+                
+                if my_attack_rect.colliderect(opp_hitbox):
+                    if opponent.state == "defend" and opponent.shield > 0:
+                        opponent.shield -= 5
+                        if opponent.shield < 0:
+                            opponent.shield = 0
+                    else:
+                        opponent.health -= 5
+                        if opponent.health < 0:
+                            opponent.health = 0
+                
+                self.attack_hold_time = 0
+                self.ai_current_action = "idle"
+        else:
+            self.attack_hold_time = 0
+            # Occasionally defend
+            if random.random() < 0.1:
+                self.state = "defend"
+        
+        # Gravity and jumping
+        self.vel_y += self.gravity
+        self.y += self.vel_y
+        
+        if self.y >= self.start_y:
+            self.y = self.start_y
+            self.is_jumping = False
+        
+        # Boundary check
+        if self.x < 50:
+            self.x = 50
+        if self.x > WIDTH - PLAYER_SIZE[0] - 50:
+            self.x = WIDTH - PLAYER_SIZE[0] - 50
+        
+        # Animation frame update
+        frames_list = self.get_current_animation_set()
+        if frames_list:
+            self.frame += self.anim_speed
+            if self.frame >= len(frames_list):
+                self.frame = 0
