@@ -10,7 +10,13 @@ from src.config import (
     BUTTON_PADDING, BUTTON_BORDER_RADIUS,
 )
 from src.states import GameState
-from src.player import set_background, available_backgrounds, current_bg_index
+from src.player import (
+    set_background, available_backgrounds, current_bg_index,
+    left_idle_frames, left_walk_frames, left_attack_frames,
+    left_defend_frames, left_jump_frames, right_idle_frames,
+    right_walk_frames, right_attack_frames, right_defend_frames,
+    right_jump_frames
+)
 
 def _find_avatar_path(filename):
     filename_lower = filename.lower()
@@ -73,16 +79,70 @@ def draw_main_menu(surface, buttons):
 
     surface.blit(menu_background, (0, 0))
 
+    title_path = os.path.join('assets', 'images', 'Game Title', 'Blade Clash Runner Game Title.png')
+    if os.path.exists(title_path):
+        try:
+            title_image = pygame.image.load(title_path).convert_alpha()
+            scaled_width = int(title_image.get_width() * 0.95)
+            scaled_height = int(title_image.get_height() * 0.95)
+            title_image = pygame.transform.smoothscale(title_image, (scaled_width, scaled_height))
+            surface.blit(title_image, (WIDTH // 2 - scaled_width // 2, 24))
+        except Exception:
+            pass
+
     for btn_rect, label in buttons:
         mouse_pos = pygame.mouse.get_pos()
-        bg_color = (40, 40, 55) if btn_rect.collidepoint(mouse_pos) else (15, 15, 22)
+        bg_color = (55, 55, 75) if btn_rect.collidepoint(mouse_pos) else (35, 35, 55)
 
         btn_surf = pygame.Surface((btn_rect.width, btn_rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(btn_surf, (*bg_color, 178), (0, 0, btn_rect.width, btn_rect.height), border_radius=BUTTON_BORDER_RADIUS)
+        pygame.draw.rect(btn_surf, (*bg_color, 160), (0, 0, btn_rect.width, btn_rect.height), border_radius=BUTTON_BORDER_RADIUS)
         surface.blit(btn_surf, (btn_rect.x, btn_rect.y))
 
         txt = FONT.render(label, True, (255, 255, 255))
         surface.blit(txt, (btn_rect.centerx - txt.get_width() // 2, btn_rect.centery - txt.get_height() // 2))
+
+
+def draw_control_card(surface, rect, icon_surface, title, key_label, active=False):
+    card_bg = (25, 28, 35)
+    border_color = (0, 180, 255) if active else (70, 80, 95)
+    fill_color = (40, 45, 55) if active else card_bg
+
+    pygame.draw.rect(surface, fill_color, rect, border_radius=18)
+    pygame.draw.rect(surface, border_color, rect, width=3, border_radius=18)
+
+    icon_size = 72
+    icon_pos = (rect.x + 20, rect.y + (rect.height - icon_size) // 2)
+    icon = pygame.transform.smoothscale(icon_surface, (icon_size, icon_size))
+    surface.blit(icon, icon_pos)
+
+    title_surf = SMALL_FONT.render(title.upper(), True, (235, 235, 235))
+    surface.blit(title_surf, (rect.x + 110, rect.y + 24))
+
+    key_surf = FONT.render(key_label, True, (255, 220, 120))
+    surface.blit(key_surf, (rect.x + 110, rect.y + rect.height - key_surf.get_height() - 20))
+
+    label_surf = SMALL_FONT.render("PRESS KEY", True, (180, 180, 200))
+    surface.blit(label_surf, (rect.x + 110, rect.y + rect.height - key_surf.get_height() - 42))
+
+
+def draw_instruction_card(surface, rect, image_surface, title, key_label, extra_label=None):
+    pygame.draw.rect(surface, (40, 40, 45), rect, border_radius=16)
+    pygame.draw.rect(surface, (100, 110, 130), rect, width=2, border_radius=16)
+
+    icon_size = min(120, rect.height - 24)
+    icon_rect = pygame.Rect(rect.x + 16, rect.y + 16, icon_size, icon_size)
+    icon = pygame.transform.smoothscale(image_surface, (icon_size, icon_size))
+    surface.blit(icon, icon_rect.topleft)
+
+    title_surf = FONT.render(title, True, (245, 245, 245))
+    surface.blit(title_surf, (icon_rect.right + 16, rect.y + 22))
+
+    key_surf = SMALL_FONT.render(key_label, True, (255, 215, 120))
+    surface.blit(key_surf, (icon_rect.right + 16, rect.y + 22 + title_surf.get_height() + 8))
+
+    if extra_label:
+        extra_surf = SMALL_FONT.render(extra_label, True, (180, 180, 200))
+        surface.blit(extra_surf, (icon_rect.right + 16, rect.y + rect.height - extra_surf.get_height() - 16))
 
 
 def draw_ui_elements(surface):
@@ -282,20 +342,27 @@ class UIManager:
         self.inputted_code = ""
         self.active_mp_input = False
         self.status_msg = "Select HOST or enter a join code."
+        self.selected_avatar_index = 0
+        self.avatar_choices = [
+            ("LEFT PLAYER", avatar_left),
+            ("RIGHT PLAYER", avatar_right)
+        ]
 
         self.background_index = current_bg_index
 
     def _build_main_menu_buttons(self):
         labels = [
-            "LOCAL MATCH",
+            "LOCAL MULTIPLAYER",
+            "SINGLE PLAYER",
             "MULTIPLAYER (LAN)",
             "CHANGE BACKGROUND",
-            "GAME OPTIONS",
+            "CHANGE AVATAR",
+            "HOW TO PLAY",
             "EXIT GAME"
         ]
         small_w = int(BUTTON_WIDTH * 0.8)
         small_h = int(BUTTON_HEIGHT * 0.8)
-        start_y = 350
+        start_y = 300
 
         buttons = []
         for i, label in enumerate(labels):
@@ -313,12 +380,17 @@ class UIManager:
                 result = self._handle_main_menu_click(mouse_pos)
                 if result:
                     return result
+            elif self.state == GameState.HOW_TO_PLAY:
+                # Clicking anywhere closes the How To Play overlay
+                self.state = GameState.MAIN_MENU
             elif self.state == GameState.NAME_INPUT:
                 self._handle_name_input_mouse(mouse_pos, player1, player2)
             elif self.state == GameState.MULTIPLAYER_MENU:
                 self._handle_multiplayer_menu_mouse(mouse_pos, player1, player2, net)
             elif self.state == GameState.BACKGROUND_MENU:
                 self._handle_background_menu_mouse(mouse_pos)
+            elif self.state == GameState.AVATAR_MENU:
+                self._handle_avatar_menu_mouse(mouse_pos)
             elif self.state == GameState.PLAYING:
                 self._handle_playing_mouse(mouse_pos)
             elif self.state == GameState.PAUSED:
@@ -336,7 +408,7 @@ class UIManager:
     def _handle_main_menu_click(self, mouse_pos):
         for btn_rect, label in self.main_menu_buttons:
             if btn_rect.collidepoint(mouse_pos):
-                if label == "LOCAL MATCH":
+                if label == "LOCAL MULTIPLAYER":
                     self.player1_name = "Player 1"
                     self.player2_name = "Player 2"
                     self.active_box = None
@@ -356,8 +428,12 @@ class UIManager:
                 elif label == "CHANGE BACKGROUND":
                     self.status_msg = "Use the arrows to preview available stage backgrounds."
                     self.state = GameState.BACKGROUND_MENU
-                elif label == "GAME OPTIONS":
-                    self.state = GameState.OPTIONS
+                elif label == "CHANGE AVATAR":
+                    self.selected_avatar_index = 0
+                    self.status_msg = "Choose your avatar. Active by default."
+                    self.state = GameState.AVATAR_MENU
+                elif label == "HOW TO PLAY":
+                    self.state = GameState.HOW_TO_PLAY
                 elif label == "EXIT GAME":
                     return {"quit": True}
                 break
@@ -425,6 +501,25 @@ class UIManager:
             set_background(self.background_index)
             self.status_msg = "Background applied successfully."
         elif BG_BACK_BTN.collidepoint(mouse_pos):
+            self.state = GameState.MAIN_MENU
+
+    def _handle_avatar_menu_mouse(self, mouse_pos):
+        avatar_count = len(self.avatar_choices)
+        menu_x = BG_MENU_RECT.x + 40
+        menu_y = BG_MENU_RECT.y + 120
+        item_w = 260
+        item_h = 280
+        gap = 20
+
+        for idx, (label, _) in enumerate(self.avatar_choices):
+            item_x = menu_x + idx * (item_w + gap)
+            item_rect = pygame.Rect(item_x, menu_y, item_w, item_h)
+            if item_rect.collidepoint(mouse_pos):
+                self.selected_avatar_index = idx
+                self.status_msg = f"{label} selected."
+
+        back_btn = pygame.Rect(BG_MENU_RECT.centerx - 100, BG_MENU_RECT.bottom - 90, 200, 50)
+        if back_btn.collidepoint(mouse_pos):
             self.state = GameState.MAIN_MENU
 
     def _handle_playing_mouse(self, mouse_pos):
@@ -506,7 +601,7 @@ class UIManager:
                 self.state = GameState.PLAYING
             elif self.state == GameState.OPTIONS:
                 self.state = GameState.PAUSED
-            elif self.state == GameState.MULTIPLAYER_MENU:
+            elif self.state in (GameState.MULTIPLAYER_MENU, GameState.HOW_TO_PLAY, GameState.AVATAR_MENU):
                 self.state = GameState.MAIN_MENU
 
         if self.state == GameState.GAME_OVER and event.key != pygame.K_ESCAPE:
@@ -552,6 +647,10 @@ class UIManager:
             self._draw_multiplayer_menu(surface)
         elif self.state == GameState.BACKGROUND_MENU:
             self._draw_background_menu(surface)
+        elif self.state == GameState.AVATAR_MENU:
+            self._draw_avatar_menu(surface)
+        elif self.state == GameState.HOW_TO_PLAY:
+            self._draw_how_to_play(surface)
         else:
             self._draw_game_screen(surface, player1, player2)
 
@@ -614,6 +713,49 @@ class UIManager:
     def _draw_background_menu(self, surface):
         surface.fill((10, 10, 15))
         draw_background_changer_menu(surface, self.background_index)
+
+    def _draw_avatar_menu(self, surface):
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        surface.blit(overlay, (0, 0))
+
+        pygame.draw.rect(surface, (32, 32, 36), BG_MENU_RECT, border_radius=20)
+        pygame.draw.rect(surface, (0, 180, 255), BG_MENU_RECT, width=4, border_radius=20)
+
+        title = MENU_FONT.render("CHANGE PLAYER", True, (255, 255, 255))
+        surface.blit(title, (BG_MENU_RECT.centerx - title.get_width() // 2, BG_MENU_RECT.y + 40))
+
+        item_w = 260
+        item_h = 280
+        gap = 20
+        start_x = BG_MENU_RECT.x + 40
+        start_y = BG_MENU_RECT.y + 120
+
+        for idx, (label, avatar_surf) in enumerate(self.avatar_choices):
+            item_x = start_x + idx * (item_w + gap)
+            item_rect = pygame.Rect(item_x, start_y, item_w, item_h)
+            is_active = idx == self.selected_avatar_index
+
+            pygame.draw.rect(surface, (40, 44, 51), item_rect, border_radius=18)
+            pygame.draw.rect(surface, (0, 200, 145) if is_active else (80, 90, 110), item_rect, width=3, border_radius=18)
+
+            icon = pygame.transform.smoothscale(avatar_surf, (item_w - 40, item_h - 120))
+            surface.blit(icon, (item_rect.x + 20, item_rect.y + 20))
+
+            label_surf = FONT.render(label, True, (235, 235, 235))
+            surface.blit(label_surf, (item_rect.x + 20, item_rect.y + item_h - 84))
+
+            status_surf = SMALL_FONT.render("ACTIVE" if is_active else "CLICK TO SELECT", True, (160, 220, 255) if is_active else (180, 180, 190))
+            surface.blit(status_surf, (item_rect.x + 20, item_rect.y + item_h - 50))
+
+        back_btn = pygame.Rect(BG_MENU_RECT.centerx - 100, BG_MENU_RECT.bottom - 90, 200, 50)
+        btn_color = (60, 130, 240) if back_btn.collidepoint(pygame.mouse.get_pos()) else (45, 105, 215)
+        pygame.draw.rect(surface, btn_color, back_btn, border_radius=10)
+        instruction = SMALL_FONT.render("CLICK TO GO TO MENU OR PRESS ESC", True, (200, 200, 200))
+        surface.blit(instruction, (BG_MENU_RECT.centerx - instruction.get_width() // 2, BG_MENU_RECT.bottom - 130))
+
+        btn_txt = SMALL_FONT.render("BACK TO MENU", True, (255, 255, 255))
+        surface.blit(btn_txt, btn_txt.get_rect(center=back_btn.center))
 
     def _draw_game_screen(self, surface, player1, player2):
         from src.player import game_background
@@ -701,3 +843,60 @@ class UIManager:
         surface.blit(text_game_over, rect_game_over)
         surface.blit(text_winner, rect_winner)
         surface.blit(text_continue, rect_continue)
+
+    def _draw_how_to_play(self, surface):
+        # Full-screen dark instructional overlay explaining controls
+        try:
+            from src.player import (
+                left_walk_frames, left_attack_frames, left_defend_frames, left_jump_frames,
+                right_walk_frames, right_attack_frames, right_defend_frames, right_jump_frames
+            )
+        except Exception:
+            left_walk_frames = left_attack_frames = left_defend_frames = left_jump_frames = None
+            right_walk_frames = right_attack_frames = right_defend_frames = right_jump_frames = None
+
+        surface.fill((30, 30, 35))
+
+        title = MENU_FONT.render("HOW TO PLAY — CONTROLS", True, (245, 245, 245))
+        surface.blit(title, (WIDTH // 2 - title.get_width() // 2, 36))
+
+        subtitle = SMALL_FONT.render("Left player uses W A S D F   |   Right player uses ↑ ↓ ← → P", True, (190, 190, 200))
+        surface.blit(subtitle, (WIDTH // 2 - subtitle.get_width() // 2, 96))
+
+        card_w = 525
+        card_h = 132
+        gap = 10
+        left_x = 80
+        right_x = WIDTH - 80 - card_w
+        top_y = 140
+
+        left_actions = [
+            ("W - JUMP", left_jump_frames[0] if left_jump_frames else None, "W"),
+            ("S - DEFEND", left_defend_frames[0] if left_defend_frames else None, "S"),
+            ("A - BACK WALK", left_walk_frames[0] if left_walk_frames else None, "A"),
+            ("D - FORWARD WALK", left_walk_frames[-1] if left_walk_frames else None, "D"),
+            ("W + D - FORWARD JUMP", left_jump_frames[0] if left_jump_frames else None, "W + D"),
+            ("F - ATTACK", left_attack_frames[3] if left_attack_frames and len(left_attack_frames) > 3 else (left_attack_frames[-1] if left_attack_frames else None), "F")
+        ]
+
+        right_actions = [
+            ("UP - JUMP", right_jump_frames[0] if right_jump_frames else None, "↑"),
+            ("DOWN - DEFEND", right_defend_frames[0] if right_defend_frames else None, "↓"),
+            ("LEFT - BACK WALK", right_walk_frames[0] if right_walk_frames else None, "←"),
+            ("RIGHT - FORWARD WALK", right_walk_frames[-1] if right_walk_frames else None, "→"),
+            ("UP + RIGHT - FORWARD JUMP", right_jump_frames[0] if right_jump_frames else None, "↑ + →"),
+            ("P - ATTACK", right_attack_frames[3] if right_attack_frames and len(right_attack_frames) > 3 else (right_attack_frames[-1] if right_attack_frames else None), "P")
+        ]
+
+        for idx, (text, frame_surf, key_text) in enumerate(left_actions):
+            card_y = top_y + idx * (card_h + gap)
+            rect = pygame.Rect(left_x, card_y, card_w, card_h)
+            draw_instruction_card(surface, rect, frame_surf or pygame.Surface((1, 1), pygame.SRCALPHA), text, key_text)
+
+        for idx, (text, frame_surf, key_text) in enumerate(right_actions):
+            card_y = top_y + idx * (card_h + gap)
+            rect = pygame.Rect(right_x, card_y, card_w, card_h)
+            draw_instruction_card(surface, rect, frame_surf or pygame.Surface((1, 1), pygame.SRCALPHA), text, key_text)
+
+        footer = SMALL_FONT.render("CLICK TO GO TO MENU OR PRESS ESC", True, (200, 200, 200))
+        surface.blit(footer, (WIDTH // 2 - footer.get_width() // 2, HEIGHT - 60))
