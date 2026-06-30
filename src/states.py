@@ -7,6 +7,8 @@ class GameState(Enum):
     MULTIPLAYER_MENU = auto()
     PLAYING = auto()
     PAUSED = auto()
+    HOW_TO_PLAY = auto()
     OPTIONS = auto()
     BACKGROUND_MENU = auto()
+    AVATAR_MENU = auto()
     GAME_OVER = auto()
