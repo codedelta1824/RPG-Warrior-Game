@@ -886,7 +886,7 @@ class UIManager:
         # FPS overlay stays restricted exclusively to active playing states
         if self.state == GameState.PLAYING and self.fps_enabled:
             draw_fps_counter(surface, clock)
-            
+
     def _draw_name_input(self, surface, mouse_pos):
         panel_w, panel_h = 400, 400
         panel_x = (WIDTH - panel_w) // 2
@@ -1127,3 +1127,4 @@ class UIManager:
 
         footer = SMALL_FONT.render("CLICK TO GO TO MENU OR PRESS ESC", True, (200, 200, 200))
         surface.blit(footer, (WIDTH // 2 - footer.get_width() // 2, HEIGHT - 60))
+        
