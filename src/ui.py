@@ -68,6 +68,8 @@ class LavaDrop:
         pygame.draw.circle(core_surf, core_color, (self.size // 2, self.size // 2), max(1, self.size // 3))
         surface.blit(core_surf, (int(self.x - self.size // 2), int(self.y - self.size // 2)))
 
+# --- ADD THESE INSIDE YOUR UIManager CLASS IN ui.py ---
+
 def _find_avatar_path(filename):
     filename_lower = filename.lower()
     if os.path.isdir(AVATAR_PATH):
@@ -395,6 +397,11 @@ def draw_fps_counter(surface, clock):
 
 class UIManager:
     def __init__(self):
+        # --- ADD THESE INSIDE UIManager.__init__ ---
+        from src.config import MENU_MUSIC_PATH
+        self.music_muted = False
+        self.current_music_path = MENU_MUSIC_PATH
+        self.show_gear_menu = False
         self.state = GameState.MAIN_MENU
         self.main_menu_buttons = self._build_main_menu_buttons()
         self.player1_name = "Player 1"
@@ -428,7 +435,29 @@ class UIManager:
         # Initialize lava drops for menu animation
         self.lava_drops = []
         self.lava_drop_timer = 0
+    
+    
+    def play_menu_music(self):
+        """Loads and plays the active menu music loop if audio isn't muted."""
+        if self.music_muted:
+            return
+            
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+            
+        if not pygame.mixer.music.get_busy():
+            try:
+                pygame.mixer.music.load(self.current_music_path)
+                pygame.mixer.music.set_volume(0.4)
+                pygame.mixer.music.play(loops=-1)
+            except pygame.error as e:
+                print(f"Audio Error: {e}")
 
+    def stop_music(self):
+        """Stops the currently playing background music."""
+        if pygame.mixer.get_init():
+            pygame.mixer.music.stop()
+    
     def _build_main_menu_buttons(self):
         labels = [
             "LOCAL MULTIPLAYER",
@@ -453,6 +482,38 @@ class UIManager:
     def handle_event(self, event, mouse_pos, player1, player2, net):
         if event.type == pygame.QUIT:
             return {"quit": True}
+        
+        # --- ADD TO GameState.MAIN_MENU EVENT ROUTER ---
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            from src.config import SPEAKER_BTN, GEAR_BTN, CHANGE_SOUND_BTN, MENU_MUSIC_PATH, MENU_MUSIC_PATH_2
+            
+            # 1. Speaker Mute/Unmute Toggle logic
+            if SPEAKER_BTN.collidepoint(mouse_pos):
+                self.music_muted = not self.music_muted
+                if self.music_muted:
+                    pygame.mixer.music.stop()
+                else:
+                    self.play_menu_music()
+                return {"handled": True}
+                
+            # 2. Gear Menu Visibility Toggle logic
+            elif GEAR_BTN.collidepoint(mouse_pos):
+                self.show_gear_menu = not self.show_gear_menu
+                return {"handled": True}
+                
+            # 3. Change Sound Option Selection (Dynamic 2-way toggle!)
+            elif self.show_gear_menu and CHANGE_SOUND_BTN.collidepoint(mouse_pos):
+                # Check what is currently playing and flip it to the other one
+                if self.current_music_path == MENU_MUSIC_PATH:
+                    self.current_music_path = MENU_MUSIC_PATH_2
+                else:
+                    self.current_music_path = MENU_MUSIC_PATH
+                    
+                # Stop the track and fire up the new one immediately
+                pygame.mixer.music.stop()
+                self.play_menu_music()
+                self.show_gear_menu = False  # Close the popup menu automatically
+                return {"handled": True}
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.state == GameState.MAIN_MENU:
@@ -734,7 +795,17 @@ class UIManager:
         if self.state == GameState.PLAYING and (player1.health < 1 or player2.health < 1):
             self.state = GameState.GAME_OVER
 
+        # Example of where to put it inside ui.py:
+        if self.state == GameState.MAIN_MENU:
+            self.play_menu_music()
+            # ... draw main menu graphics ...
+            
+        elif self.state == GameState.PLAYING:
+            self.stop_music()
+            # ... draw gameplay ...    
+
     def render(self, surface, mouse_pos, player1, player2, clock):
+        
         # Update and spawn lava drops for main menu
         if self.state == GameState.MAIN_MENU:
             self.lava_drop_timer += 1
@@ -749,8 +820,54 @@ class UIManager:
             # Update existing drops and remove dead ones
             self.lava_drops = [drop for drop in self.lava_drops if drop.update()]
         
+        # --- SCREEN ROUTER DRAWING SYSTEM ---
         if self.state == GameState.MAIN_MENU:
             draw_main_menu(surface, self.main_menu_buttons, self.lava_drops)
+            
+            # =================================================================
+            # AUDIO ICON DRAWING (Now safely locked inside MAIN_MENU state!)
+            # =================================================================
+            import math
+            from src.config import SPEAKER_BTN, GEAR_BTN, CHANGE_SOUND_BTN, SMALL_FONT
+            
+            GOLD = (212, 175, 55)
+            DARK_GREY = (30, 30, 35)
+            WHITE = (255, 255, 255)
+            
+            # 1. DRAW GEAR ICON DIRECTLY
+            pygame.draw.rect(surface, DARK_GREY, GEAR_BTN, border_radius=8)
+            pygame.draw.rect(surface, GOLD, GEAR_BTN, width=2, border_radius=8)
+            g_cx, g_cy = GEAR_BTN.center
+            for i in range(8):
+                angle = i * (math.pi / 4)
+                tx = g_cx + int(math.cos(angle) * 15)
+                ty = g_cy + int(math.sin(angle) * 15)
+                pygame.draw.circle(surface, GOLD, (tx, ty), 4)
+            pygame.draw.circle(surface, GOLD, (g_cx, g_cy), 11)
+            pygame.draw.circle(surface, DARK_GREY, (g_cx, g_cy), 5)
+            
+            # 2. DRAW SPEAKER ICON DIRECTLY
+            pygame.draw.rect(surface, DARK_GREY, SPEAKER_BTN, border_radius=8)
+            pygame.draw.rect(surface, GOLD, SPEAKER_BTN, width=2, border_radius=8)
+            s_cx, s_cy = SPEAKER_BTN.center
+            pygame.draw.rect(surface, GOLD, (s_cx - 14, s_cy - 7, 7, 14))
+            pygame.draw.polygon(surface, GOLD, [(s_cx - 7, s_cy - 7), (s_cx + 2, s_cy - 14), (s_cx + 2, s_cy + 14), (s_cx - 7, s_cy + 7)])
+            
+            if not self.music_muted:
+                pygame.draw.arc(surface, GOLD, (s_cx - 3, s_cy - 10, 14, 20), -math.pi/3, math.pi/3, 2)
+                pygame.draw.arc(surface, GOLD, (s_cx + 3, s_cy - 15, 18, 30), -math.pi/3, math.pi/3, 2)
+            else:
+                pygame.draw.line(surface, GOLD, (s_cx + 7, s_cy - 6), (s_cx + 17, s_cy + 6), 2)
+                pygame.draw.line(surface, GOLD, (s_cx + 17, s_cy - 6), (s_cx + 7, s_cy + 6), 2)
+                
+            # 3. DRAW DROPDOWN DIRECTLY
+            if self.show_gear_menu:
+                pygame.draw.rect(surface, DARK_GREY, CHANGE_SOUND_BTN, border_radius=6)
+                pygame.draw.rect(surface, GOLD, CHANGE_SOUND_BTN, width=2, border_radius=6)
+                pop_txt = SMALL_FONT.render("Change Sound", True, WHITE)
+                surface.blit(pop_txt, (CHANGE_SOUND_BTN.centerx - pop_txt.get_width()//2, CHANGE_SOUND_BTN.centery - pop_txt.get_height()//2))    
+            # =================================================================
+
         elif self.state == GameState.NAME_INPUT:
             self._draw_name_input(surface, mouse_pos)
         elif self.state == GameState.SINGLE_PLAYER_NAME_INPUT:
@@ -766,9 +883,10 @@ class UIManager:
         else:
             self._draw_game_screen(surface, player1, player2)
 
+        # FPS overlay stays restricted exclusively to active playing states
         if self.state == GameState.PLAYING and self.fps_enabled:
             draw_fps_counter(surface, clock)
-
+            
     def _draw_name_input(self, surface, mouse_pos):
         panel_w, panel_h = 400, 400
         panel_x = (WIDTH - panel_w) // 2
