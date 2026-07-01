@@ -2,7 +2,7 @@ import pygame
 import sys
 from src.config import WIDTH, HEIGHT
 from src.network import Network
-from src.player import Player
+from src.player import Player, Bot
 from src.states import GameState
 from src.ui import UIManager
 
@@ -16,8 +16,8 @@ def main():
     net = Network()
     ui = UIManager()
 
-    player1 = Player(300, HEIGHT - 450, side="left")
-    player2 = Player(WIDTH - 550, HEIGHT - 450, side="right")
+    player1 = Player(300, HEIGHT - 430, side="left")
+    player2 = Player(WIDTH - 550, HEIGHT - 430, side="right")
 
     running = True
 
@@ -34,7 +34,9 @@ def main():
         if ui.state == GameState.PLAYING:
             keys = pygame.key.get_pressed()
             if ui.mp_role == "HOST":
-                player1.update(keys, player2)
+                special_blade = player1.update(keys, player2)
+                if special_blade is not None:
+                    ui.active_saw_blade = special_blade
                 data = net.send({
                     "x": player1.x,
                     "y": player1.y,
@@ -49,7 +51,9 @@ def main():
                     player2.health = data.get("hp", player2.health)
                     player2.shield = data.get("sh", player2.shield)
             elif ui.mp_role == "CLIENT":
-                player2.update(keys, player1)
+                special_blade = player2.update(keys, player1)
+                if special_blade is not None:
+                    ui.active_saw_blade = special_blade
                 data = net.send({
                     "x": player2.x,
                     "y": player2.y,
@@ -63,11 +67,23 @@ def main():
                     player1.state = data.get("state", player1.state)
                     player1.health = data.get("hp", player1.health)
                     player1.shield = data.get("sh", player1.shield)
+            elif ui.single_player_mode and ui.bot is not None:
+                special_blade = player1.update(keys, ui.bot)
+                if special_blade is not None and ui.active_saw_blade is None:
+                    ui.active_saw_blade = special_blade
+                special_blade = ui.bot.update(None, player1)
+                if special_blade is not None and ui.active_saw_blade is None:
+                    ui.active_saw_blade = special_blade
             else:
-                player1.update(keys, player2)
-                player2.update(keys, player1)
+                special_blade = player1.update(keys, player2)
+                if special_blade is not None and ui.active_saw_blade is None:
+                    ui.active_saw_blade = special_blade
+                special_blade = player2.update(keys, player1)
+                if special_blade is not None and ui.active_saw_blade is None:
+                    ui.active_saw_blade = special_blade
 
-        ui.render(screen, mouse_pos, player1, player2, clock)
+        active_opponent = ui.bot if ui.single_player_mode and ui.bot is not None else player2
+        ui.render(screen, mouse_pos, player1, active_opponent, clock)
         pygame.display.flip()
         clock.tick(60)
     pygame.quit()
@@ -75,4 +91,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
