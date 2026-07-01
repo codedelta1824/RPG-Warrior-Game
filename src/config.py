@@ -10,6 +10,18 @@ FPS = 60
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)
 
+SOUND_PATH = os.path.join(project_root, "assets", "Sounds")
+MENU_MUSIC_PATH = os.path.join(SOUND_PATH, "Menu_Sound1.mp3")
+MENU_MUSIC_PATH_2 = os.path.join(SOUND_PATH, "Menu_Sound2.mp3")
+
+# --- ADD THIS TO THE UI ELEMENTS SECTION OF config.py ---
+# Placed nicely in the bottom right corner (Width: 1920, Height: 1080)
+SPEAKER_BTN = pygame.Rect(WIDTH - 90, HEIGHT - 90, 60, 60)
+GEAR_BTN    = pygame.Rect(WIDTH - 170, HEIGHT - 90, 60, 60)
+
+# The popup selection frame that appears directly above the gear button
+CHANGE_SOUND_BTN = pygame.Rect(WIDTH - 250, HEIGHT - 150, 140, 45)
+
 BASE_PATH = os.path.join(project_root, "assets", "images")
 BACKGROUND_PATH = os.path.join(BASE_PATH, "Background Images")
 AVATAR_PATH = os.path.join(BASE_PATH, "Avatar Logos")
