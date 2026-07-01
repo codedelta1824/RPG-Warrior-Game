@@ -346,7 +346,7 @@ def draw_multiplayer_menu(surface, room_code, input_text, is_active, status_msg)
     draw_ornate_button(surface, MP_JOIN_BTN, "JOIN ROOM MATCH", mouse, SMALL_FONT)
     draw_ornate_button(surface, MP_BACK_BTN, "BACK TO MENU", mouse, SMALL_FONT)
 
-def draw_health_bars(surface, hp1, sh1, hp2, sh2, name1="Player 1", name2="Player 2"):
+def draw_health_bars(surface, hp1, sh1, hp2, sh2, name1="Player 1", name2="Player 2", special1=0, special2=0, max_hp1=100, max_hp2=100, ready1=False, ready2=False):
     small_radius = int(PAUSE_BUTTON_RADIUS * 0.75)
     pause_center_x = PAUSE_BUTTON_POS[0]
     safety_gap = 20
@@ -363,6 +363,7 @@ def draw_health_bars(surface, hp1, sh1, hp2, sh2, name1="Player 1", name2="Playe
 
     hp_h = 38
     sh_h = 16
+    special_h = 12
     border_thickness = 3
 
     font_names = pygame.font.SysFont('Arial', 20, bold=True)
@@ -372,7 +373,7 @@ def draw_health_bars(surface, hp1, sh1, hp2, sh2, name1="Player 1", name2="Playe
     surface.blit(text_n2, (p2_x + bar_w - text_n2.get_width(), 14))
 
     pygame.draw.rect(surface, (80, 20, 20), (p1_x, 42, bar_w, hp_h))
-    p1_hp_w = int((max(0, min(hp1, 100)) / 100) * bar_w)
+    p1_hp_w = int((max(0, min(hp1, max_hp1)) / max_hp1) * bar_w)
     pygame.draw.rect(surface, (230, 35, 35), (p1_x, 42, p1_hp_w, hp_h))
     pygame.draw.rect(surface, (0, 0, 0), (p1_x, 42, bar_w, hp_h), width=border_thickness)
 
@@ -381,8 +382,19 @@ def draw_health_bars(surface, hp1, sh1, hp2, sh2, name1="Player 1", name2="Playe
     pygame.draw.rect(surface, (35, 115, 245), (p1_x, 86, p1_sh_w, sh_h))
     pygame.draw.rect(surface, (0, 0, 0), (p1_x, 86, bar_w, sh_h), width=border_thickness)
 
+    pygame.draw.rect(surface, (25, 20, 0), (p1_x, 106, bar_w, special_h))
+    p1_special_w = int((max(0, min(special1, 10)) / 10) * bar_w)
+    pygame.draw.rect(surface, (245, 215, 50), (p1_x, 106, p1_special_w, special_h))
+    pygame.draw.rect(surface, (0, 0, 0), (p1_x, 106, bar_w, special_h), width=border_thickness)
+    if ready1:
+        pulse_alpha = 150 + int(80 * (0.5 + 0.5 * math.sin(pygame.time.get_ticks() / 180)))
+        glow_surface = pygame.Surface((p1_special_w, special_h), pygame.SRCALPHA)
+        glow_surface.fill((255, 255, 200, pulse_alpha))
+        surface.blit(glow_surface, (p1_x, 106))
+        pygame.draw.rect(surface, (255, 240, 120), (p1_x + bar_w - 12, 106, 10, special_h), border_radius=4)
+
     pygame.draw.rect(surface, (80, 20, 20), (p2_x, 42, bar_w, hp_h))
-    p2_hp_w = int((max(0, min(hp2, 100)) / 100) * bar_w)
+    p2_hp_w = int((max(0, min(hp2, max_hp2)) / max_hp2) * bar_w)
     pygame.draw.rect(surface, (230, 35, 35), (p2_x + (bar_w - p2_hp_w), 42, p2_hp_w, hp_h))
     pygame.draw.rect(surface, (0, 0, 0), (p2_x, 42, bar_w, hp_h), width=border_thickness)
 
@@ -390,6 +402,17 @@ def draw_health_bars(surface, hp1, sh1, hp2, sh2, name1="Player 1", name2="Playe
     p2_sh_w = int((max(0, min(sh2, 100)) / 100) * bar_w)
     pygame.draw.rect(surface, (35, 115, 245), (p2_x + (bar_w - p2_sh_w), 86, p2_sh_w, sh_h))
     pygame.draw.rect(surface, (0, 0, 0), (p2_x, 86, bar_w, sh_h), width=border_thickness)
+
+    pygame.draw.rect(surface, (25, 20, 0), (p2_x, 106, bar_w, special_h))
+    p2_special_w = int((max(0, min(special2, 10)) / 10) * bar_w)
+    pygame.draw.rect(surface, (245, 215, 50), (p2_x + (bar_w - p2_special_w), 106, p2_special_w, special_h))
+    pygame.draw.rect(surface, (0, 0, 0), (p2_x, 106, bar_w, special_h), width=border_thickness)
+    if ready2:
+        pulse_alpha = 150 + int(80 * (0.5 + 0.5 * math.sin(pygame.time.get_ticks() / 180)))
+        glow_surface = pygame.Surface((p2_special_w, special_h), pygame.SRCALPHA)
+        glow_surface.fill((255, 255, 200, pulse_alpha))
+        surface.blit(glow_surface, (p2_x + (bar_w - p2_special_w), 106))
+        pygame.draw.rect(surface, (255, 240, 120), (p2_x + 2, 106, 10, special_h), border_radius=4)
 
 def draw_fps_counter(surface, clock):
     fps_text = SMALL_FONT.render(f"FPS: {int(clock.get_fps())}", True, (0, 255, 0))
@@ -431,6 +454,12 @@ class UIManager:
         self.single_player_mode = False
         self.current_round = 1
         self.bot = None
+        self.active_saw_blade = None
+        self.round_result_message = ""
+        self.round_lost = False
+        self.round_victory = False
+        self.round_background_map = {1: 10, 2: 3, 3: 6, 4: 6}
+        self.final_boss_round = 4
         
         # Initialize lava drops for menu animation
         self.lava_drops = []
@@ -563,6 +592,9 @@ class UIManager:
                 elif label == "SINGLE PLAYER":
                     self.player1_name = "Player"
                     self.active_box = 'sp_name'
+                    self.single_player_mode = False
+                    self.bot = None
+                    self.current_round = 1
                     self.status_msg = "Enter your name for single player mode."
                     self.state = GameState.SINGLE_PLAYER_NAME_INPUT
                 elif label == "MULTIPLAYER (LAN)":
@@ -608,6 +640,27 @@ class UIManager:
             if self.player2_name.strip() == "":
                 self.player2_name = "Player 2"
             self._reset_match(player1, player2)
+            self.state = GameState.PLAYING
+        else:
+            self.active_box = None
+
+    def _handle_single_player_name_input_mouse(self, mouse_pos, player1, player2):
+        panel_w, panel_h = 400, 320
+        panel_x = (WIDTH - panel_w) // 2
+        panel_y = (HEIGHT - panel_h) // 2
+        name_box = pygame.Rect(panel_x + 50, panel_y + 125, 300, 40)
+        continue_btn = pygame.Rect(panel_x + (panel_w - 240) // 2, panel_y + panel_h - 75, 240, 45)
+
+        if name_box.collidepoint(mouse_pos):
+            self.active_box = 'sp_name'
+            if self.player1_name == "Player":
+                self.player1_name = ""
+        elif continue_btn.collidepoint(mouse_pos):
+            if self.player1_name.strip() == "":
+                self.player1_name = "Player"
+            self.player2_name = "BOT"
+            self.single_player_mode = True
+            self._start_single_player_match(player1, player2)
             self.state = GameState.PLAYING
         else:
             self.active_box = None
@@ -712,6 +765,13 @@ class UIManager:
             self.state = GameState.PAUSED
 
     def _handle_keydown(self, event, player1, player2, net):
+        if self.state == GameState.ROUND_RESULT and event.key == pygame.K_SPACE:
+            self._advance_round(player1)
+            return
+        if self.state == GameState.GAME_OVER and self.round_lost and event.key == pygame.K_SPACE:
+            self._reset_to_menu(player1, player2)
+            return
+
         if self.state == GameState.NAME_INPUT:
             if self.active_box == 'p1':
                 if event.key == pygame.K_BACKSPACE:
@@ -738,7 +798,12 @@ class UIManager:
                 if event.key == pygame.K_BACKSPACE:
                     self.player1_name = self.player1_name[:-1]
                 elif event.key == pygame.K_RETURN:
-                    self.active_box = None
+                    if self.player1_name.strip() == "":
+                        self.player1_name = "Player"
+                    self.player2_name = "BOT"
+                    self.single_player_mode = True
+                    self._start_single_player_match(player1, player2)
+                    self.state = GameState.PLAYING
                 else:
                     if len(self.player1_name) < 14 and event.unicode.isprintable():
                         self.player1_name += event.unicode
@@ -761,7 +826,7 @@ class UIManager:
             elif self.state in (GameState.MULTIPLAYER_MENU, GameState.HOW_TO_PLAY, GameState.AVATAR_MENU, GameState.SINGLE_PLAYER_NAME_INPUT):
                 self.state = GameState.MAIN_MENU
 
-        if self.state == GameState.GAME_OVER and event.key != pygame.K_ESCAPE:
+        if self.state == GameState.GAME_OVER and event.key == pygame.K_SPACE and not self.round_lost:
             self.state = GameState.MAIN_MENU
 
     def _attempt_join(self, player1, player2, net):
@@ -777,11 +842,61 @@ class UIManager:
             self.status_msg = "Unable to join room. Check the code or broker."
 
     def _reset_match(self, player1, player2):
-        player1.health, player1.shield = 100, 100
-        player2.health, player2.shield = 100, 100
-        player1.x, player1.y = 300, HEIGHT - 450
-        player2.x, player2.y = WIDTH - 300, HEIGHT - 450
+        player1.health = player1.max_health if hasattr(player1, "max_health") else 100
+        player1.shield = 100
+        player2.health = player2.max_health if hasattr(player2, "max_health") else 100
+        player2.shield = 100
+        player1.x, player1.y = 300, HEIGHT - 430
+        player2.x, player2.y = WIDTH - 300, HEIGHT - 430
         player1.state, player2.state = "idle", "idle"
+
+    def _restore_player_after_round(self, player1):
+        player1.shield = 100
+        player1.health = min(player1.max_health, player1.health + 20)
+
+    def _set_round_background(self, round_num):
+        if round_num in self.round_background_map:
+            bg_index = self.round_background_map[round_num]
+            if 0 <= bg_index < len(available_backgrounds):
+                self.background_index = bg_index
+                set_background(bg_index)
+
+    def _prepare_next_round(self, player1):
+        self._restore_player_after_round(player1)
+        self._set_round_background(self.current_round)
+        if self.current_round == 3:
+            player1.attack_speed = max(0.28, player1.attack_speed - 0.08)
+        else:
+            player1.attack_speed = 0.45
+
+        if self.bot is not None:
+            self.bot.set_difficulty(self.current_round)
+            if self.current_round == self.final_boss_round:
+                self.bot.max_health = 300
+                self.bot.health = 300
+                self.bot.is_boss = True
+                self.player2_name = "FINAL BOSS"
+            else:
+                self.player2_name = f"BOT - ROUND {self.current_round}"
+        self._reset_match(player1, self.bot)
+
+    def _start_single_player_match(self, player1, player2):
+        self.current_round = max(1, min(self.current_round, self.final_boss_round))
+        if self.current_round == self.final_boss_round:
+            self.bot = Bot(WIDTH - 300, HEIGHT - 430, side="right", difficulty_round=self.final_boss_round)
+            self.player2_name = "FINAL BOSS"
+        else:
+            self.bot = Bot(WIDTH - 300, HEIGHT - 430, side="right", difficulty_round=self.current_round)
+            self.player2_name = f"BOT - ROUND {self.current_round}"
+
+        self._set_round_background(self.current_round)
+        if self.current_round == 3:
+            player1.attack_speed = max(0.28, player1.attack_speed - 0.08)
+        else:
+            player1.attack_speed = 0.45
+
+        self._reset_match(player1, self.bot)
+        self.status_msg = f"Single player match started: Round {self.current_round}."
 
     def _generate_room_code(self):
         return f"{random.randint(100000, 999999)}"
@@ -792,10 +907,35 @@ class UIManager:
             self._reset_match(player1, player2)
             self.state = GameState.PLAYING
 
-        if self.state == GameState.PLAYING and (player1.health < 1 or player2.health < 1):
+        if self.state == GameState.PLAYING and self.single_player_mode and self.bot is not None:
+            if player1.health < 1 or self.bot.health < 1:
+                self._stop_walk_audio(player1, self.bot)
+                self.active_saw_blade = None
+                if player1.health < 1:
+                    self.round_lost = True
+                    self.round_victory = False
+                    self.round_result_message = "YOU LOSE"
+                    self.status_msg = "Press SPACEBAR to go to Menu."
+                    self.state = GameState.GAME_OVER
+                else:
+                    self.round_victory = True
+                    self.round_lost = False
+                    if self.current_round < 3:
+                        self.round_result_message = f"{self.player1_name} wins Round {self.current_round}!"
+                    elif self.current_round == 3:
+                        self.round_result_message = f"{self.player1_name} wins Round 3! Final Boss incoming."
+                    else:
+                        self.round_result_message = f"{self.player1_name} defeats the Final Boss!"
+                    self.state = GameState.ROUND_RESULT
+
+        elif self.state == GameState.PLAYING and not self.single_player_mode and (player1.health < 1 or player2.health < 1):
             self.state = GameState.GAME_OVER
 
-        # Example of where to put it inside ui.py:
+        if self.active_saw_blade:
+            self.active_saw_blade.update()
+            if not self.active_saw_blade.active:
+                self.active_saw_blade = None
+
         if self.state == GameState.MAIN_MENU:
             self.play_menu_music()
             # ... draw main menu graphics ...
@@ -880,6 +1020,12 @@ class UIManager:
             self._draw_avatar_menu(surface)
         elif self.state == GameState.HOW_TO_PLAY:
             self._draw_how_to_play(surface)
+        elif self.state == GameState.ROUND_RESULT:
+            self._draw_game_screen(surface, player1, player2)
+            self._draw_round_result_overlay(surface)
+        elif self.state == GameState.GAME_OVER and self.round_lost:
+            self._draw_game_screen(surface, player1, player2)
+            self._draw_round_result_overlay(surface)
         else:
             self._draw_game_screen(surface, player1, player2)
 
@@ -932,6 +1078,41 @@ class UIManager:
         
         # Draw ornate continue button
         draw_ornate_button(surface, continue_btn, "CONTINUE", mouse_pos, font_btn)
+
+    def _draw_single_player_name_input(self, surface, mouse_pos):
+        panel_w, panel_h = 420, 300
+        panel_x = (WIDTH - panel_w) // 2
+        panel_y = (HEIGHT - panel_h) // 2
+
+        surface.fill((18, 18, 24))
+        pygame.draw.rect(surface, (35, 35, 42), (panel_x, panel_y, panel_w, panel_h), border_radius=16)
+        pygame.draw.rect(surface, (75, 110, 220), (panel_x, panel_y, panel_w, panel_h), width=3, border_radius=16)
+
+        font_title = pygame.font.SysFont('Arial', 24, bold=True)
+        font_lbl = pygame.font.SysFont('Arial', 14, bold=True)
+        font_txt = pygame.font.SysFont('Arial', 18, bold=False)
+        font_btn = pygame.font.SysFont('Arial', 18, bold=True)
+
+        title_text = font_title.render("SINGLE PLAYER MODE", True, (255, 255, 255))
+        surface.blit(title_text, (panel_x + panel_w // 2 - title_text.get_width() // 2, panel_y + 35))
+
+        hint_text = font_lbl.render("ENTER YOUR NAME", True, (190, 190, 205))
+        surface.blit(hint_text, (panel_x + 50, panel_y + 100))
+
+        name_box = pygame.Rect(panel_x + 50, panel_y + 125, 320, 44)
+        box_color = (100, 160, 255) if self.active_box == 'sp_name' else (70, 70, 80)
+        pygame.draw.rect(surface, (25, 25, 30), name_box, border_radius=8)
+        pygame.draw.rect(surface, box_color, name_box, width=2, border_radius=8)
+
+        display_name = self.player1_name if self.player1_name != "" or self.active_box == 'sp_name' else "Player"
+        name_surf = font_txt.render(display_name, True, (235, 235, 235) if self.player1_name != "" else (120, 120, 130))
+        surface.blit(name_surf, (name_box.x + 14, name_box.y + 12))
+
+        status_text = SMALL_FONT.render(self.status_msg, True, (200, 200, 210))
+        surface.blit(status_text, (panel_x + 50, panel_y + 190))
+
+        continue_btn = pygame.Rect(panel_x + (panel_w - 260) // 2, panel_y + panel_h - 75, 260, 48)
+        draw_ornate_button(surface, continue_btn, "START DUEL", mouse_pos, font_btn)
 
     def _draw_multiplayer_menu(self, surface):
         surface.fill((15, 15, 18))
@@ -990,14 +1171,31 @@ class UIManager:
         surface.blit(game_background, (0, 0))
         player1.draw(surface, opponent_x=player2.x)
         player2.draw(surface, opponent_x=player1.x)
+        if self.active_saw_blade is not None:
+            self.active_saw_blade.draw(surface)
         draw_ui_elements(surface)
-        draw_health_bars(surface, player1.health, player1.shield, player2.health, player2.shield, self.player1_name, self.player2_name)
+        max_hp2 = player2.max_health if hasattr(player2, "max_health") else 100
+        draw_health_bars(
+            surface,
+            player1.health,
+            player1.shield,
+            player2.health,
+            player2.shield,
+            self.player1_name,
+            self.player2_name,
+            player1.special_meter,
+            player2.special_meter,
+            player1.max_health,
+            max_hp2,
+            player1.special_ready,
+            player2.special_ready
+        )
 
         if self.state == GameState.PAUSED:
             draw_pause_menu(surface)
         elif self.state == GameState.OPTIONS:
             self._draw_options_overlay(surface)
-        elif self.state == GameState.GAME_OVER:
+        elif self.state == GameState.GAME_OVER and not self.round_lost:
             self._draw_game_over(surface, player1, player2)
 
     def _draw_options_overlay(self, surface):
@@ -1056,7 +1254,7 @@ class UIManager:
         text_game_over = font_title.render("GAME OVER", True, (230, 35, 35))
         winner_text = f"{self.player1_name} Wins!" if player2.health < 1 else f"{self.player2_name} Wins!"
         text_winner = font_subtitle.render(winner_text, True, (255, 255, 255))
-        text_continue = font_footer.render("Press any key or click to return to Main Menu", True, (180, 180, 180))
+        text_continue = font_footer.render("Press SPACEBAR to return to Main Menu", True, (180, 180, 180))
 
         rect_game_over = text_game_over.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 50))
         rect_winner = text_winner.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 25))
@@ -1070,6 +1268,78 @@ class UIManager:
         surface.blit(text_game_over, rect_game_over)
         surface.blit(text_winner, rect_winner)
         surface.blit(text_continue, rect_continue)
+
+    def _draw_round_result_overlay(self, surface):
+        font_title = pygame.font.SysFont('Arial', 64, bold=True)
+        font_subtitle = pygame.font.SysFont('Arial', 28, bold=True)
+        font_footer = pygame.font.SysFont('Arial', 20, bold=False)
+
+        main_text = font_title.render(self.round_result_message, True, (255, 235, 100))
+        if self.round_lost:
+            subtitle = "Press SPACEBAR to go to Menu"
+            subtitle_color = (255, 170, 170)
+        elif self.current_round == self.final_boss_round and self.round_victory:
+            subtitle = "Press SPACEBAR to return to Menu"
+            subtitle_color = (200, 255, 180)
+        else:
+            subtitle = "Press SPACEBAR to continue to the next round"
+            subtitle_color = (200, 255, 180)
+
+        subtitle_text = font_subtitle.render(subtitle, True, subtitle_color)
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        surface.blit(overlay, (0, 0))
+
+        surface.blit(main_text, main_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 30)))
+        surface.blit(subtitle_text, subtitle_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 40)))
+        surface.blit(font_footer.render("Spacebar to continue", True, (220, 220, 220)), (WIDTH // 2 - 110, HEIGHT // 2 + 90))
+
+    def _stop_walk_audio(self, player1, player2):
+        for entity in (player1, player2):
+            if getattr(entity, "walk_channel", None) is not None:
+                try:
+                    if entity.walk_channel.get_busy():
+                        entity.walk_channel.stop()
+                except Exception:
+                    pass
+
+    def _advance_round(self, player1):
+        if self.current_round < 3:
+            self.current_round += 1
+            self.round_result_message = ""
+            self.round_victory = False
+            self._prepare_next_round(player1)
+            self.state = GameState.PLAYING
+        elif self.current_round == 3:
+            self.current_round = self.final_boss_round
+            self.round_result_message = ""
+            self.round_victory = False
+            self._start_single_player_match(player1, None)
+            self.state = GameState.PLAYING
+        else:
+            self._reset_to_menu(player1, None)
+
+    def _reset_to_menu(self, player1, player2):
+        self.single_player_mode = False
+        self.bot = None
+        self.active_saw_blade = None
+        self.current_round = 1
+        self.round_result_message = ""
+        self.round_lost = False
+        self.round_victory = False
+        self.state = GameState.MAIN_MENU
+        self.status_msg = "Select HOST or enter a join code."
+        if player1 is not None:
+            player1.health = player1.max_health
+            player1.shield = 100
+            player1.attack_speed = 0.45
+            player1.x, player1.y = 300, HEIGHT - 430
+            player1.state = "idle"
+        if player2 is not None:
+            player2.health = player2.max_health if hasattr(player2, "max_health") else 100
+            player2.shield = 100
+            player2.x, player2.y = WIDTH - 300, HEIGHT - 430
+            player2.state = "idle"
 
     def _draw_how_to_play(self, surface):
         # Full-screen dark instructional overlay explaining controls
@@ -1127,9 +1397,3 @@ class UIManager:
 
         footer = SMALL_FONT.render("CLICK TO GO TO MENU OR PRESS ESC", True, (200, 200, 200))
         surface.blit(footer, (WIDTH // 2 - footer.get_width() // 2, HEIGHT - 60))
-
-
-
-
-
-        
