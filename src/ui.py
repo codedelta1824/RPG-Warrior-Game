@@ -1127,4 +1127,9 @@ class UIManager:
 
         footer = SMALL_FONT.render("CLICK TO GO TO MENU OR PRESS ESC", True, (200, 200, 200))
         surface.blit(footer, (WIDTH // 2 - footer.get_width() // 2, HEIGHT - 60))
+
+
+
+
+
         
