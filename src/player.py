@@ -406,3 +406,4 @@ class Bot(Player):
             self.frame += self.anim_speed
             if self.frame >= len(frames_list):
                 self.frame = 0
+                
