@@ -13,6 +13,13 @@ project_root = os.path.dirname(current_dir)
 SOUND_PATH = os.path.join(project_root, "assets", "Sounds")
 MENU_MUSIC_PATH = os.path.join(SOUND_PATH, "Menu_Sound1.mp3")
 MENU_MUSIC_PATH_2 = os.path.join(SOUND_PATH, "Menu_Sound2.mp3")
+SWORD_SWEEP_PATH = os.path.join(SOUND_PATH, "Sword_Sweep.mp3")
+JUMP_SOUND_PATH = os.path.join(SOUND_PATH, "jump.mp3")
+SWORD_HIT_PATH = os.path.join(SOUND_PATH, "Sword_Hit.mp3")
+WALK_SOUND_PATH = os.path.join(SOUND_PATH, "Walking.mp3")
+SAW_BLADE_SPINNING_PATH = os.path.join(SOUND_PATH, "Saw_Blade_Spinning.mp3")
+SPECIAL_MOVES_PATH = os.path.join(project_root, "assets", "images", "Special Moves")
+SAW_BLADE_IMAGE_NAME = "Saw_Blade"
 
 # --- ADD THIS TO THE UI ELEMENTS SECTION OF config.py ---
 # Placed nicely in the bottom right corner (Width: 1920, Height: 1080)
