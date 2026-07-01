@@ -70,7 +70,6 @@ def main():
         ui.render(screen, mouse_pos, player1, player2, clock)
         pygame.display.flip()
         clock.tick(60)
-
     pygame.quit()
     sys.exit()
 
