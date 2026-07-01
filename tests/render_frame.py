@@ -10,8 +10,8 @@ pygame.init()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 
 # Create players and draw one frame
-p1 = Player(300, HEIGHT - 450, side="left")
-p2 = Player(WIDTH - 550, HEIGHT - 450, side="right")
+p1 = Player(300, HEIGHT - 430, side="left")
+p2 = Player(WIDTH - 550, HEIGHT - 430, side="right")
 
 screen.blit(game_background, (0, 0))
 # draw players
