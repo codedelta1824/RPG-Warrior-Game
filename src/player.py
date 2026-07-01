@@ -1,8 +1,11 @@
 import pygame
 import os
+import random
 from src.config import (
     WIDTH, HEIGHT, BACKGROUND_PATH, PLAYER_ANIM_PATH, RIGHT_PLAYER_ANIM_PATH,
-    PLAYER_SIZE, HITBOX_SIZE, BG_PREVIEW_SIZE
+    PLAYER_SIZE, HITBOX_SIZE, BG_PREVIEW_SIZE,
+    SWORD_SWEEP_PATH, JUMP_SOUND_PATH, SWORD_HIT_PATH, WALK_SOUND_PATH,
+    SAW_BLADE_SPINNING_PATH, SPECIAL_MOVES_PATH, SAW_BLADE_IMAGE_NAME
 )
 
 # ASSET LOADING HELPERS
@@ -162,11 +165,25 @@ class Player:
         self.anim_speed = 0.15
         self.state = "idle"
         self.health = 100
+        self.max_health = 100
         self.shield = 100
         self.side = side
 
         # Attack charge tracking variables
         self.attack_hold_time = 0
+        self.attack_power = 7
+        self.attack_speed = 0.45
+        self.jump_force = -20
+        self.special_meter = 0
+        self.special_ready = False
+        self.consecutive_hits = 0
+        self.special_cooldown = 0
+        self.special_requested = False
+        self.is_boss = False
+        self.last_play_state = "idle"
+        self.walk_channel_id = 1 if side == "left" else 2
+        self.walk_channel = None
+        self.saw_channel = pygame.mixer.Channel(3)
 
         if self.side == "left":
             self.controls = {
@@ -174,7 +191,8 @@ class Player:
                 "right": pygame.K_d,
                 "up": pygame.K_w,
                 "down": pygame.K_s,
-                "attack": pygame.K_f
+                "attack": pygame.K_f,
+                "special": pygame.K_r
             }
         else:
             self.controls = {
@@ -182,7 +200,8 @@ class Player:
                 "right": pygame.K_RIGHT,
                 "up": pygame.K_UP,
                 "down": pygame.K_DOWN,
-                "attack": pygame.K_p
+                "attack": pygame.K_p,
+                "special": pygame.K_o
             }
 
     def get_hitbox(self):
@@ -201,75 +220,213 @@ class Player:
         else:
             return pygame.Rect(hitbox.x - reach_extension, hitbox.y, hitbox.width + reach_extension, hitbox.height)
 
-    def update(self, keys, opponent):
-        """Handles movement inputs, gravity, animations, continuous loop attack tracking, and collisions."""
-        self.state = "idle"
+    @classmethod
+    def _ensure_audio_resources(cls):
+        if getattr(cls, "audio_loaded", False):
+            return
 
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            pygame.mixer.set_num_channels(12)
+        except Exception:
+            pass
+
+        def _safe_load(path):
+            try:
+                return pygame.mixer.Sound(path)
+            except Exception:
+                return None
+
+        cls.walking_sound = _safe_load(WALK_SOUND_PATH)
+        cls.jump_sound = _safe_load(JUMP_SOUND_PATH)
+        cls.sword_sweep_sound = _safe_load(SWORD_SWEEP_PATH)
+        cls.sword_hit_sound = _safe_load(SWORD_HIT_PATH)
+        cls.saw_blade_sound = _safe_load(SAW_BLADE_SPINNING_PATH)
+        cls.audio_loaded = True
+
+    def _play_walk_audio(self, moving):
+        if not pygame.mixer.get_init() or not getattr(self.__class__, "audio_loaded", False):
+            return
+
+        if self.walk_channel is None:
+            self.walk_channel = pygame.mixer.Channel(self.walk_channel_id)
+
+        if moving and self.walking_sound is not None:
+            if not self.walk_channel.get_busy():
+                self.walk_channel.play(self.walking_sound, loops=-1)
+        else:
+            if self.walk_channel is not None and self.walk_channel.get_busy():
+                self.walk_channel.stop()
+
+    def _play_jump_audio(self):
+        if not pygame.mixer.get_init() or not getattr(self.__class__, "audio_loaded", False):
+            return
+        if self.jump_sound is not None:
+            self.jump_sound.play()
+
+    def _play_attack_audio(self):
+        if not pygame.mixer.get_init() or not getattr(self.__class__, "audio_loaded", False):
+            return
+        if self.sword_sweep_sound is not None:
+            self.sword_sweep_sound.play()
+
+    def _play_saw_blade_audio(self):
+        if not pygame.mixer.get_init() or not getattr(self.__class__, "audio_loaded", False):
+            return
+        if self.saw_blade_sound is not None:
+            try:
+                if not self.saw_channel.get_busy():
+                    self.saw_channel.set_volume(0.65)
+                    self.saw_channel.play(self.saw_blade_sound, loops=0)
+            except Exception:
+                pass
+
+    def _stop_saw_blade_audio(self):
+        try:
+            if self.saw_channel and self.saw_channel.get_busy():
+                self.saw_channel.stop()
+        except Exception:
+            pass
+
+    def _play_hit_audio(self):
+        if not pygame.mixer.get_init() or not getattr(self.__class__, "audio_loaded", False):
+            return
+        if self.sword_hit_sound is not None:
+            self.sword_hit_sound.play()
+
+    def _register_hit(self, defender_is_defending=False):
+        self.consecutive_hits += 1
+        self.special_meter = min(10, self.special_meter + 1)
+        if self.special_meter >= 10:
+            self.special_ready = True
+        if defender_is_defending:
+            self._play_hit_audio()
+
+    def _reset_on_received_hit(self):
+        self.consecutive_hits = 0
+        # Special meter is retained through hits and only resets on special activation
+
+    def _apply_attack_damage(self, opponent, damage, defender_blocked=False):
+        if defender_blocked:
+            opponent.shield -= damage
+            if opponent.shield < 0:
+                opponent.shield = 0
+        else:
+            opponent.health -= damage
+            if opponent.health < 0:
+                opponent.health = 0
+
+        self._register_hit(defender_is_defending=defender_blocked)
+        opponent._reset_on_received_hit()
+
+    def _resolve_attack(self, opponent, damage):
+        my_attack_rect = self.get_attack_rect(opponent.x)
+        opp_hitbox = opponent.get_hitbox()
+
+        if my_attack_rect.colliderect(opp_hitbox):
+            defender_blocked = opponent.state == "defend" and opponent.shield > 0
+            self._apply_attack_damage(opponent, damage, defender_blocked)
+            if defender_blocked:
+                self._play_hit_audio()
+            return True
+        return False
+
+    def update(self, keys, opponent):
+        """Handles movement inputs, gravity, animations, audio, special moves, and collisions."""
+        self.__class__._ensure_audio_resources()
+
+        self.state = "idle"
+        moving_on_x = False
+        if self.special_cooldown > 0:
+            self.special_cooldown -= 1
+
+        # Movement
         if keys[self.controls["left"]]:
             self.x -= self.speed
             self.state = "walk"
+            moving_on_x = True
         if keys[self.controls["right"]]:
             self.x += self.speed
             self.state = "walk"
+            moving_on_x = True
 
-        if keys[self.controls["attack"]]:
+        # Special move input
+        if self.controls.get("special") and keys[self.controls["special"]] and self.special_ready and self.special_cooldown == 0:
+            self.special_requested = True
+
+        # Regular attack input
+        if keys[self.controls["attack"]] and not self.special_requested:
             self.state = "attack"
             self.attack_hold_time += 1 / 60
-
-            if self.attack_hold_time >= 0.45:
-                my_attack_rect = self.get_attack_rect(opponent.x)
-                opp_hitbox = opponent.get_hitbox()
-
-                if my_attack_rect.colliderect(opp_hitbox):
-                    if opponent.state == "defend" and opponent.shield > 0:
-                        opponent.shield -= 5
-                        if opponent.shield < 0:
-                            opponent.shield = 0
-                    else:
-                        opponent.health -= 5
-                        if opponent.health < 0:
-                            opponent.health = 0
-
+            if self.attack_hold_time >= self.attack_speed:
+                self._play_attack_audio()
+                damage = self.attack_power
+                if self._resolve_attack(opponent, damage):
+                    pass
                 self.attack_hold_time = 0
         else:
             self.attack_hold_time = 0
-            if keys[self.controls["down"]]:
+            if not self.special_requested and keys[self.controls["down"]]:
                 self.state = "defend"
 
+        # Jumping
         if keys[self.controls["up"]] and not self.is_jumping:
-            self.vel_y = -16
+            self.vel_y = self.jump_force
             self.is_jumping = True
+            self._play_jump_audio()
 
         if self.is_jumping:
             self.state = "jump"
 
+        # Apply gravity
         self.vel_y += self.gravity
         self.y += self.vel_y
-
         if self.y >= self.start_y:
             self.y = self.start_y
             self.vel_y = 0
             self.is_jumping = False
 
+        # Boundaries
         if self.x < 0:
             self.x = 0
         if self.x > WIDTH - PLAYER_SIZE[0]:
             self.x = WIDTH - PLAYER_SIZE[0]
 
+        # Prevent stale walking audio
+        self._play_walk_audio(moving_on_x and not self.is_jumping and self.y >= self.start_y)
+
         self.frame += self.anim_speed
 
         my_hitbox = self.get_hitbox()
         opp_hitbox = opponent.get_hitbox()
-
         if my_hitbox.colliderect(opp_hitbox):
             overlap_x = min(my_hitbox.right, opp_hitbox.right) - max(my_hitbox.left, opp_hitbox.left)
-
             if self.x < opponent.x:
                 self.x -= overlap_x // 2
                 opponent.x += overlap_x // 2
             else:
                 self.x += overlap_x // 2
                 opponent.x -= overlap_x // 2
+
+        special_blade = None
+        if self.special_requested:
+            special_blade = self.try_activate_special(opponent)
+
+        return special_blade
+
+    def try_activate_special(self, opponent):
+        if not self.special_requested:
+            return None
+        self.special_requested = False
+        if not self.special_ready or self.special_cooldown > 0:
+            return None
+        self.special_ready = False
+        self.special_meter = 0
+        self.special_cooldown = 300
+        self.state = "special"
+        self._play_attack_audio()
+        return SpecialSawBlade(self, opponent)
 
     def get_current_animation_set(self):
         if self.side == "left":
@@ -305,6 +462,95 @@ class Player:
             surface.blit(sprite_to_draw, (self.x, self.y))
 
 
+class SpecialSawBlade:
+    """Represents the cinematic saw blade traveling across the arena."""
+    def __init__(self, caster, target):
+        self.caster = caster
+        self.target = target
+        self.duration_frames = 240
+        self.elapsed_frames = 0
+        self.damage = 40
+        self.active = True
+        self.hit_registered = False
+
+        self.image = self._load_saw_image()
+        self.height = int(PLAYER_SIZE[1] * 1.35)
+        if self.image is not None:
+            scale_factor = self.height / self.image.get_height()
+            scaled_width = max(1, int(self.image.get_width() * scale_factor * 1.3))
+            self.image = pygame.transform.smoothscale(
+                self.image,
+                (scaled_width, self.height)
+            )
+        else:
+            self.image = pygame.Surface((240, self.height), pygame.SRCALPHA)
+            pygame.draw.circle(self.image, (255, 235, 80), (120, self.height // 2), min(80, self.height // 2))
+            pygame.draw.circle(self.image, (220, 200, 40), (120, self.height // 2), min(55, self.height // 2))
+
+        if caster.side == "left":
+            self.direction = -1
+            self.x = WIDTH - self.image.get_width()
+            self.target_x = 0
+        else:
+            self.direction = 1
+            self.x = 0
+            self.target_x = WIDTH - self.image.get_width()
+
+        self.y = self.target.y
+        self.velocity = (self.target_x - self.x) / self.duration_frames
+        self.caster._play_saw_blade_audio()
+
+    def _load_saw_image(self):
+        path = _find_asset_file(SPECIAL_MOVES_PATH, [f"{SAW_BLADE_IMAGE_NAME}.png", f"{SAW_BLADE_IMAGE_NAME}.jpg", f"{SAW_BLADE_IMAGE_NAME}.jpeg", f"{SAW_BLADE_IMAGE_NAME}.bmp"])
+        if path and os.path.exists(path):
+            try:
+                img = pygame.image.load(path)
+                if pygame.display.get_surface() is not None:
+                    try:
+                        img = img.convert_alpha()
+                    except Exception:
+                        img = img.convert()
+                return img
+            except Exception:
+                pass
+        return None
+
+    def rect(self):
+        return pygame.Rect(int(self.x), int(self.y), self.image.get_width(), self.image.get_height())
+
+    def update(self):
+        if not self.active:
+            return
+        self.elapsed_frames += 1
+        self.x += self.velocity
+
+        if self.x <= 0 or self.x >= WIDTH - self.image.get_width():
+            self.active = False
+            self.caster._stop_saw_blade_audio()
+            return
+
+        if self.elapsed_frames >= self.duration_frames:
+            self.active = False
+            self.caster._stop_saw_blade_audio()
+            return
+        self._check_collision()
+
+    def _check_collision(self):
+        if self.hit_registered or not self.active:
+            return
+        if self.rect().colliderect(self.target.get_hitbox()):
+            if self.target.is_jumping and self.target.y < self.target.start_y - (PLAYER_SIZE[1] * 0.55):
+                return
+            self.target.health -= self.damage
+            if self.target.health < 0:
+                self.target.health = 0
+            self.hit_registered = True
+
+    def draw(self, surface):
+        if not self.active:
+            return
+        surface.blit(self.image, (int(self.x), int(self.y)))
+
 class Bot(Player):
     """AI bot player for single player mode with difficulty progression."""
     def __init__(self, x, y, side="left", difficulty_round=1):
@@ -313,97 +559,124 @@ class Bot(Player):
         self.ai_action_timer = 0
         self.ai_decision_timer = 0
         self.ai_current_action = "idle"
+        self.ai_defend_cooldown = 0
         self.set_difficulty(difficulty_round)
     
     def set_difficulty(self, round_num):
-        """Set bot difficulty based on round number (1-3)."""
+        """Set bot difficulty based on round number."""
         self.difficulty_round = round_num
+        self.is_boss = False
+        self.max_health = 100
         if round_num == 1:
-            self.attack_speed = 0.45  # Default attack speed
-            self.speed = 5  # Slightly slower than player (6)
-            self.ai_aggressiveness = 0.4  # 40% chance to attack
+            self.attack_speed = 0.45
+            self.speed = 5
+            self.attack_power = 6
+            self.ai_aggressiveness = 0.45
         elif round_num == 2:
-            self.attack_speed = 0.35  # Faster attack
-            self.speed = 5.5  # Medium speed
-            self.ai_aggressiveness = 0.6  # 60% chance to attack
-        else:  # round_num == 3
-            self.attack_speed = 0.3  # Even faster attack
-            self.speed = 6  # Same as player
-            self.ai_aggressiveness = 0.75  # 75% chance to attack
+            self.attack_speed = 0.4
+            self.speed = 5.75
+            self.attack_power = 8
+            self.ai_aggressiveness = 0.6
+        elif round_num == 3:
+            self.attack_speed = 0.35
+            self.speed = 6.5
+            self.attack_power = 10
+            self.ai_aggressiveness = 0.72
+        else:
+            self.attack_speed = 0.3
+            self.speed = 6.75
+            self.attack_power = 10
+            self.ai_aggressiveness = 0.85
+            self.max_health = 200
+            self.health = 200
+            self.is_boss = True
+        self.health = min(self.health, self.max_health)
     
     def update(self, keys, opponent):
-        """AI controlled update instead of keyboard input."""
-        import random
-        
+        self.__class__._ensure_audio_resources()
         self.state = "idle"
         self.ai_decision_timer += 1
-        
-        # Make AI decisions every 30 frames (0.5 seconds)
+        if self.ai_defend_cooldown > 0:
+            self.ai_defend_cooldown -= 1
+
+        distance = abs(self.x - opponent.x)
+        far_gap = distance > 220
+        close_gap = distance < 130
+
         if self.ai_decision_timer > 30:
             self.ai_decision_timer = 0
-            # Random action selection
-            rand = random.random()
-            if rand < self.ai_aggressiveness:
-                self.ai_current_action = "attack"
-            elif rand < 0.5 + self.ai_aggressiveness / 2:
+            if far_gap:
                 self.ai_current_action = "move"
             else:
-                self.ai_current_action = "idle"
-        
-        # Execute AI action
+                rand = random.random()
+                if rand < self.ai_aggressiveness:
+                    self.ai_current_action = "attack"
+                elif rand < self.ai_aggressiveness + 0.22:
+                    self.ai_current_action = "move"
+                elif rand < self.ai_aggressiveness + 0.32 and self.ai_defend_cooldown == 0:
+                    self.ai_current_action = "defend"
+                else:
+                    self.ai_current_action = "idle"
+
         if self.ai_current_action == "move":
-            # Move towards opponent
             if self.x < opponent.x - 150:
                 self.x += self.speed
                 self.state = "walk"
             elif self.x > opponent.x + 150:
                 self.x -= self.speed
                 self.state = "walk"
-        
+
+            if far_gap and not self.is_jumping and random.random() < 0.3:
+                self.vel_y = self.jump_force
+                self.is_jumping = True
+                self.state = "jump"
+                self._play_jump_audio()
+
         elif self.ai_current_action == "attack":
-            self.state = "attack"
-            self.attack_hold_time += 1 / 60
-            
-            if self.attack_hold_time >= self.attack_speed:
-                my_attack_rect = self.get_attack_rect(opponent.x)
-                opp_hitbox = opponent.get_hitbox()
-                
-                if my_attack_rect.colliderect(opp_hitbox):
-                    if opponent.state == "defend" and opponent.shield > 0:
-                        opponent.shield -= 5
-                        if opponent.shield < 0:
-                            opponent.shield = 0
-                    else:
-                        opponent.health -= 5
-                        if opponent.health < 0:
-                            opponent.health = 0
-                
+            if self.is_jumping:
+                self.state = "jump"
                 self.attack_hold_time = 0
                 self.ai_current_action = "idle"
+            else:
+                self.state = "attack"
+                self.attack_hold_time += 1 / 60
+                if self.attack_hold_time >= self.attack_speed:
+                    self._play_attack_audio()
+                    damage = self.attack_power
+                    if self._resolve_attack(opponent, damage):
+                        pass
+                    self.attack_hold_time = 0
+                    self.ai_current_action = "idle"
+
+        elif self.ai_current_action == "defend":
+            self.state = "defend"
+            self.ai_defend_cooldown = 60
+
         else:
             self.attack_hold_time = 0
-            # Occasionally defend
-            if random.random() < 0.1:
-                self.state = "defend"
-        
-        # Gravity and jumping
+
+        if self.special_ready and self.special_cooldown == 0 and random.random() < 0.06:
+            self.special_requested = True
+
         self.vel_y += self.gravity
         self.y += self.vel_y
-        
         if self.y >= self.start_y:
             self.y = self.start_y
+            self.vel_y = 0
             self.is_jumping = False
-        
-        # Boundary check
+
         if self.x < 50:
             self.x = 50
         if self.x > WIDTH - PLAYER_SIZE[0] - 50:
             self.x = WIDTH - PLAYER_SIZE[0] - 50
-        
-        # Animation frame update
-        frames_list = self.get_current_animation_set()
-        if frames_list:
-            self.frame += self.anim_speed
-            if self.frame >= len(frames_list):
-                self.frame = 0
-                
+
+        moving = self.state == "walk" and not self.is_jumping and self.y >= self.start_y
+        self._play_walk_audio(moving)
+
+        self.frame += self.anim_speed
+
+        special_blade = None
+        if self.special_requested:
+            special_blade = self.try_activate_special(opponent)
+
+        return special_blade
