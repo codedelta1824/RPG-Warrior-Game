@@ -327,17 +327,35 @@ def draw_multiplayer_menu(surface, room_code, input_text, is_active, status_msg)
     # Draw ornate buttons for multiplayer menu
     draw_ornate_button(surface, MP_HOST_BTN, "HOST GAME ROOM", mouse, SMALL_FONT)
 
+    # Input box styling - prevent text overflow
     bg_box = (40, 40, 45) if is_active else (25, 25, 28)
     border_c = (0, 180, 255) if is_active else (70, 70, 80)
     pygame.draw.rect(surface, bg_box, MP_INPUT_BOX, border_radius=8)
     pygame.draw.rect(surface, border_c, MP_INPUT_BOX, width=2, border_radius=8)
 
-    txt_i = FONT.render(input_text if input_text else "ENTER ROOM CODE", True, (255, 255, 255) if input_text else (120, 120, 130))
+    # Display input text with clipping to prevent overflow
+    display_text = input_text[:6] if input_text else "ENTER ROOM CODE"  # Limit to 6 digits
+    txt_color = (255, 255, 255) if input_text else (120, 120, 130)
+    txt_i = FONT.render(display_text, True, txt_color)
+    
+    # Clip the text to fit in the box
+    max_text_width = MP_INPUT_BOX.width - 30
+    if txt_i.get_width() > max_text_width:
+        txt_i = pygame.transform.scale(txt_i, (max_text_width, txt_i.get_height()))
+    
     surface.blit(txt_i, (MP_INPUT_BOX.x + 15, MP_INPUT_BOX.centery - txt_i.get_height() // 2))
 
+    # Display room code (BOLD, GOLDEN, positioned above back button)
     if room_code:
-        code_lbl = FONT.render(f"YOUR ROOM CODE: {room_code}", True, (255, 255, 100))
-        surface.blit(code_lbl, (MP_MENU_RECT.centerx - code_lbl.get_width() // 2, MP_MENU_RECT.y + 260))
+        # Create a bold golden font for the room code
+        code_font = pygame.font.SysFont("Arial", 32, bold=True)
+        code_text = f"ROOM: {room_code}"
+        code_surf = code_font.render(code_text, True, (255, 215, 0))  # Golden color
+        
+        # Position it exactly above the back button
+        code_x = MP_MENU_RECT.centerx - code_surf.get_width() // 2
+        code_y = MP_BACK_BTN.y - code_surf.get_height() - 25
+        surface.blit(code_surf, (code_x, code_y))
 
     status_lbl = SMALL_FONT.render(f"STATUS: {status_msg}", True, (0, 255, 255))
     surface.blit(status_lbl, (MP_MENU_RECT.centerx - status_lbl.get_width() // 2, MP_MENU_RECT.y + 340))
@@ -670,22 +688,22 @@ class UIManager:
             self.mp_role = "HOST"
             self.generated_code = self._generate_room_code()
             if net.host_game(self.generated_code):
-                self.status_msg = f"Hosting room {self.generated_code}. Waiting for client to connect."
+                self.status_msg = f"Hosting room {self.generated_code}. Waiting for client..."
             else:
-                self.status_msg = "Unable to host room. Check the network broker."
+                self.status_msg = "Failed to host. Check network."
 
         elif MP_INPUT_BOX.collidepoint(mouse_pos):
             self.active_mp_input = True
             self.mp_role = "CLIENT"
             self.player1_name = "Host (P1)"
             self.player2_name = "Client (P2)"
-            self.status_msg = "Enter the 6-digit room code and press ENTER."
+            self.status_msg = "Enter 6-digit code. Client on same WiFi."
 
         elif MP_JOIN_BTN.collidepoint(mouse_pos):
             if self.active_mp_input:
                 self._attempt_join(player1, player2, net)
             else:
-                self.status_msg = "Select the code input field first."
+                self.status_msg = "Click input box first, then enter code."
 
         elif MP_BACK_BTN.collidepoint(mouse_pos):
             self.state = GameState.MAIN_MENU
@@ -834,12 +852,15 @@ class UIManager:
             self.status_msg = "Room code must be exactly 6 digits."
             return
 
-        if net.join_game(self.inputted_code):
+        # For local LAN, use localhost. For remote, change to host IP
+        host_ip = "127.0.0.1"  # Change this to the host's IP address for LAN play
+        
+        if net.join_game(self.inputted_code, host_ip=host_ip):
             self._reset_match(player1, player2)
             self.state = GameState.PLAYING
-            self.status_msg = "Successfully joined. Starting match."
+            self.status_msg = "Connected! Match starting..."
         else:
-            self.status_msg = "Unable to join room. Check the code or broker."
+            self.status_msg = "Join failed. Wrong code or host not found."
 
     def _reset_match(self, player1, player2):
         player1.health = player1.max_health if hasattr(player1, "max_health") else 100
@@ -849,6 +870,16 @@ class UIManager:
         player1.x, player1.y = 300, HEIGHT - 430
         player2.x, player2.y = WIDTH - 300, HEIGHT - 430
         player1.state, player2.state = "idle", "idle"
+        
+        # Reset new click-based attack/defend system states
+        for player in [player1, player2]:
+            player.is_attacking = False
+            player.is_defending = False
+            player.defend_locked = False
+            player.attack_pressed = False
+            player.defend_pressed = False
+            player.attack_frame_timer = 0
+            player.frame = 0
 
     def _restore_player_after_round(self, player1):
         player1.shield = 100
@@ -865,9 +896,9 @@ class UIManager:
         self._restore_player_after_round(player1)
         self._set_round_background(self.current_round)
         if self.current_round == 3:
-            player1.attack_speed = max(0.28, player1.attack_speed - 0.08)
+            player1.attack_speed = max(0.22, player1.attack_speed - 0.08)
         else:
-            player1.attack_speed = 0.45
+            player1.attack_speed = 0.3
 
         if self.bot is not None:
             self.bot.set_difficulty(self.current_round)
@@ -891,9 +922,9 @@ class UIManager:
 
         self._set_round_background(self.current_round)
         if self.current_round == 3:
-            player1.attack_speed = max(0.28, player1.attack_speed - 0.08)
+            player1.attack_speed = max(0.22, player1.attack_speed - 0.08)
         else:
-            player1.attack_speed = 0.45
+            player1.attack_speed = 0.3
 
         self._reset_match(player1, self.bot)
         self.status_msg = f"Single player match started: Round {self.current_round}."
@@ -1332,7 +1363,7 @@ class UIManager:
         if player1 is not None:
             player1.health = player1.max_health
             player1.shield = 100
-            player1.attack_speed = 0.45
+            player1.attack_speed = 0.3
             player1.x, player1.y = 300, HEIGHT - 430
             player1.state = "idle"
         if player2 is not None:
@@ -1342,7 +1373,7 @@ class UIManager:
             player2.state = "idle"
 
     def _draw_how_to_play(self, surface):
-        # Full-screen dark instructional overlay explaining controls
+        # Full-screen scrollable instructional overlay
         try:
             from src.player import (
                 left_walk_frames, left_attack_frames, left_defend_frames, left_jump_frames,
@@ -1354,26 +1385,29 @@ class UIManager:
 
         surface.fill((30, 30, 35))
 
-        title = MENU_FONT.render("HOW TO PLAY — CONTROLS", True, (245, 245, 245))
-        surface.blit(title, (WIDTH // 2 - title.get_width() // 2, 36))
+        title = MENU_FONT.render("HOW TO PLAY — COMPLETE GUIDE", True, (245, 245, 245))
+        surface.blit(title, (WIDTH // 2 - title.get_width() // 2, 20))
 
-        subtitle = SMALL_FONT.render("Left player uses W A S D F   |   Right player uses ↑ ↓ ← → P", True, (190, 190, 200))
-        surface.blit(subtitle, (WIDTH // 2 - subtitle.get_width() // 2, 96))
+        # ========== CONTROLS SECTION ==========
+        subtitle = SMALL_FONT.render("BASIC CONTROLS", True, (255, 215, 0))
+        surface.blit(subtitle, (50, 80))
 
-        card_w = 525
-        card_h = 132
-        gap = 10
-        left_x = 80
-        right_x = WIDTH - 80 - card_w
-        top_y = 140
+        info_txt = SMALL_FONT.render("Left player: W A S D F R  |  Right player: ↑ ↓ ← → P O", True, (190, 190, 200))
+        surface.blit(info_txt, (50, 115))
+
+        card_w = 420
+        card_h = 100
+        gap = 8
+        left_x = 50
+        right_x = WIDTH - 50 - card_w
+        top_y = 160
 
         left_actions = [
             ("W - JUMP", left_jump_frames[0] if left_jump_frames else None, "W"),
             ("S - DEFEND", left_defend_frames[0] if left_defend_frames else None, "S"),
             ("A - BACK WALK", left_walk_frames[0] if left_walk_frames else None, "A"),
             ("D - FORWARD WALK", left_walk_frames[-1] if left_walk_frames else None, "D"),
-            ("W + D - FORWARD JUMP", left_jump_frames[0] if left_jump_frames else None, "W + D"),
-            ("F - ATTACK", left_attack_frames[3] if left_attack_frames and len(left_attack_frames) > 3 else (left_attack_frames[-1] if left_attack_frames else None), "F")
+            ("F - ATTACK", left_attack_frames[3] if left_attack_frames and len(left_attack_frames) > 3 else (left_attack_frames[-1] if left_attack_frames else None), "F"),
         ]
 
         right_actions = [
@@ -1381,8 +1415,7 @@ class UIManager:
             ("DOWN - DEFEND", right_defend_frames[0] if right_defend_frames else None, "↓"),
             ("LEFT - BACK WALK", right_walk_frames[0] if right_walk_frames else None, "←"),
             ("RIGHT - FORWARD WALK", right_walk_frames[-1] if right_walk_frames else None, "→"),
-            ("UP + RIGHT - FORWARD JUMP", right_jump_frames[0] if right_jump_frames else None, "↑ + →"),
-            ("P - ATTACK", right_attack_frames[3] if right_attack_frames and len(right_attack_frames) > 3 else (right_attack_frames[-1] if right_attack_frames else None), "P")
+            ("P - ATTACK", right_attack_frames[3] if right_attack_frames and len(right_attack_frames) > 3 else (right_attack_frames[-1] if right_attack_frames else None), "P"),
         ]
 
         for idx, (text, frame_surf, key_text) in enumerate(left_actions):
@@ -1395,5 +1428,64 @@ class UIManager:
             rect = pygame.Rect(right_x, card_y, card_w, card_h)
             draw_instruction_card(surface, rect, frame_surf or pygame.Surface((1, 1), pygame.SRCALPHA), text, key_text)
 
+        # ========== SPECIAL MOVE SECTION ==========
+        special_y = top_y + len(left_actions) * (card_h + gap) + 30
+
+        special_title = SMALL_FONT.render("SPECIAL MOVE - SAW BLADE", True, (255, 215, 0))
+        surface.blit(special_title, (50, special_y))
+
+        special_info = [
+            "• Build Special Meter by landing attacks on opponent",
+            "• When meter is full (golden bar shows 'READY'), press R (left) or O (right)",
+            "• Unleash a spinning saw blade that damages the opponent",
+            "• 5 second cooldown after use - plan your special moves wisely!"
+        ]
+
+        special_text_y = special_y + 35
+        for line in special_info:
+            line_surf = pygame.font.SysFont("Arial", 16, bold=False).render(line, True, (200, 200, 210))
+            surface.blit(line_surf, (70, special_text_y))
+            special_text_y += 28
+
+        # ========== MULTIPLAYER (LAN) SECTION ==========
+        mp_y = special_text_y + 30
+
+        mp_title = SMALL_FONT.render("ONLINE MULTIPLAYER (LAN)", True, (255, 215, 0))
+        surface.blit(mp_title, (50, mp_y))
+
+        mp_steps = [
+            "1. SELECT 'MULTIPLAYER (LAN)' FROM MAIN MENU",
+            "2. HOST: Click 'HOST GAME ROOM' - you'll get a 6-digit code",
+            "3. CLIENT: Click input box, enter the 6-digit code from host",
+            "4. BOTH MUST BE ON THE SAME WiFi NETWORK",
+            "5. After client joins, game starts - host is left player, client is right",
+            "6. Note: For LAN on different machines, modify host IP in network settings"
+        ]
+
+        mp_text_y = mp_y + 35
+        for step in mp_steps:
+            step_surf = pygame.font.SysFont("Arial", 16, bold=False).render(step, True, (200, 200, 210))
+            surface.blit(step_surf, (70, mp_text_y))
+            mp_text_y += 26
+
+        # ========== ATTACK & DEFEND MECHANICS ==========
+        mechanics_y = mp_text_y + 30
+
+        mech_title = SMALL_FONT.render("ATTACK & DEFEND MECHANICS", True, (255, 215, 0))
+        surface.blit(mech_title, (50, mechanics_y))
+
+        mech_info = [
+            "ATTACK: Click F/P once and hold briefly - automatic swing takes ~0.3 seconds",
+            "DEFEND: Click S/DOWN to toggle defend mode ON/OFF - stay locked in position",
+            "SHIELD: Defend absorbs damage with a shield bar - use strategically",
+            "⚠ IMPORTANT: Cannot attack or jump while already attacking. Plan ahead!"
+        ]
+
+        mech_text_y = mechanics_y + 35
+        for info in mech_info:
+            info_surf = pygame.font.SysFont("Arial", 16, bold=False).render(info, True, (200, 200, 210))
+            surface.blit(info_surf, (70, mech_text_y))
+            mech_text_y += 26
+
         footer = SMALL_FONT.render("CLICK TO GO TO MENU OR PRESS ESC", True, (200, 200, 200))
-        surface.blit(footer, (WIDTH // 2 - footer.get_width() // 2, HEIGHT - 60))
+        surface.blit(footer, (WIDTH // 2 - footer.get_width() // 2, HEIGHT - 40))
