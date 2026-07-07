@@ -101,7 +101,7 @@ current_bg_index = 0
 if available_backgrounds:
     wall_index = next(
         (i for i, (name, _) in enumerate(available_backgrounds)
-         if os.path.splitext(name)[0].lower() == "wall"),
+        if os.path.splitext(name)[0].lower() == "wall"),
         None
     )
     if wall_index is not None:
@@ -172,7 +172,7 @@ class Player:
         # Attack charge tracking variables
         self.attack_hold_time = 0
         self.attack_power = 7
-        self.attack_speed = 0.45
+        self.attack_speed = 0.3  # Changed to 0.3s for click-based system
         self.jump_force = -20
         self.special_meter = 0
         self.special_ready = False
@@ -184,6 +184,14 @@ class Player:
         self.walk_channel_id = 1 if side == "left" else 2
         self.walk_channel = None
         self.saw_channel = pygame.mixer.Channel(3)
+        
+        # NEW: Click-based attack and defend system
+        self.attack_pressed = False
+        self.defend_pressed = False
+        self.is_attacking = False
+        self.is_defending = False
+        self.attack_frame_timer = 0
+        self.defend_locked = False
 
         if self.side == "left":
             self.controls = {
@@ -355,29 +363,49 @@ class Player:
         if self.controls.get("special") and keys[self.controls["special"]] and self.special_ready and self.special_cooldown == 0:
             self.special_requested = True
 
-        # Regular attack input
-        if keys[self.controls["attack"]] and not self.special_requested:
+        # NEW: Click-based attack system (not hold-based)
+        # Detect attack key press (transition from not pressed to pressed)
+        attack_key_pressed = keys[self.controls["attack"]]
+        if attack_key_pressed and not self.attack_pressed and not self.is_jumping and not self.special_requested:
+            # Attack button just pressed
+            self.is_attacking = True
+            self.attack_frame_timer = 0
+            self._play_attack_audio()
+        self.attack_pressed = attack_key_pressed
+        
+        # Continue attack animation if active
+        if self.is_attacking and not self.is_jumping:
             self.state = "attack"
-            self.attack_hold_time += 1 / 60
-            if self.attack_hold_time >= self.attack_speed:
-                self._play_attack_audio()
+            self.attack_frame_timer += 1 / 60
+            # Deal damage after 0.15s into the attack
+            if self.attack_frame_timer >= 0.15 and self.attack_frame_timer < 0.16:
                 damage = self.attack_power
-                if self._resolve_attack(opponent, damage):
-                    pass
-                self.attack_hold_time = 0
-        else:
-            self.attack_hold_time = 0
-            if not self.special_requested and keys[self.controls["down"]]:
-                self.state = "defend"
+                self._resolve_attack(opponent, damage)
+            # End attack after animation completes (0.3s)
+            if self.attack_frame_timer >= self.attack_speed:
+                self.is_attacking = False
+        
+        # NEW: Click-based defend toggle system
+        defend_key_pressed = keys[self.controls["down"]]
+        if defend_key_pressed and not self.defend_pressed and not self.special_requested and not self.is_attacking:
+            # Defend button just pressed - toggle defend state
+            self.is_defending = not self.is_defending
+            self.defend_locked = not self.defend_locked
+        self.defend_pressed = defend_key_pressed
+        
+        # Apply defend state if locked in
+        if self.is_defending and not self.is_attacking and not self.is_jumping:
+            self.state = "defend"
 
-        # Jumping
-        if keys[self.controls["up"]] and not self.is_jumping:
+        # Jumping (cannot jump while attacking)
+        if keys[self.controls["up"]] and not self.is_jumping and not self.is_attacking:
             self.vel_y = self.jump_force
             self.is_jumping = True
             self._play_jump_audio()
 
         if self.is_jumping:
             self.state = "jump"
+            self.is_attacking = False  # Cancel attack if jumping
 
         # Apply gravity
         self.vel_y += self.gravity
@@ -396,7 +424,11 @@ class Player:
         # Prevent stale walking audio
         self._play_walk_audio(moving_on_x and not self.is_jumping and self.y >= self.start_y)
 
-        self.frame += self.anim_speed
+        # FIX: For idle and defend, freeze on first frame. For other states, animate normally
+        if self.state in ["idle", "defend"]:
+            self.frame = 0  # Stay on first frame only
+        else:
+            self.frame += self.anim_speed
 
         my_hitbox = self.get_hitbox()
         opp_hitbox = opponent.get_hitbox()
@@ -568,17 +600,17 @@ class Bot(Player):
         self.is_boss = False
         self.max_health = 100
         if round_num == 1:
-            self.attack_speed = 0.45
+            self.attack_speed = 0.3
             self.speed = 5
             self.attack_power = 6
             self.ai_aggressiveness = 0.45
         elif round_num == 2:
-            self.attack_speed = 0.4
+            self.attack_speed = 0.3
             self.speed = 5.75
             self.attack_power = 8
             self.ai_aggressiveness = 0.6
         elif round_num == 3:
-            self.attack_speed = 0.35
+            self.attack_speed = 0.3
             self.speed = 6.5
             self.attack_power = 10
             self.ai_aggressiveness = 0.72
@@ -635,25 +667,29 @@ class Bot(Player):
         elif self.ai_current_action == "attack":
             if self.is_jumping:
                 self.state = "jump"
-                self.attack_hold_time = 0
+                self.is_attacking = False
                 self.ai_current_action = "idle"
             else:
+                # Use the same click-based attack system
                 self.state = "attack"
-                self.attack_hold_time += 1 / 60
-                if self.attack_hold_time >= self.attack_speed:
-                    self._play_attack_audio()
+                self.attack_frame_timer += 1 / 60
+                if self.attack_frame_timer >= 0.15 and self.attack_frame_timer < 0.16:
                     damage = self.attack_power
-                    if self._resolve_attack(opponent, damage):
-                        pass
-                    self.attack_hold_time = 0
+                    self._resolve_attack(opponent, damage)
+                    self._play_attack_audio()
+                if self.attack_frame_timer >= self.attack_speed:
+                    self.is_attacking = False
+                    self.attack_frame_timer = 0
                     self.ai_current_action = "idle"
 
         elif self.ai_current_action == "defend":
             self.state = "defend"
+            self.is_defending = True
             self.ai_defend_cooldown = 60
 
         else:
-            self.attack_hold_time = 0
+            self.is_attacking = False
+            self.is_defending = False
 
         if self.special_ready and self.special_cooldown == 0 and random.random() < 0.06:
             self.special_requested = True
@@ -673,7 +709,11 @@ class Bot(Player):
         moving = self.state == "walk" and not self.is_jumping and self.y >= self.start_y
         self._play_walk_audio(moving)
 
-        self.frame += self.anim_speed
+        # FIX: For idle and defend, freeze on first frame
+        if self.state in ["idle", "defend"]:
+            self.frame = 0
+        else:
+            self.frame += self.anim_speed
 
         special_blade = None
         if self.special_requested:
