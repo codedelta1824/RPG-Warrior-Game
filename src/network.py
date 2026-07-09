@@ -14,6 +14,11 @@ class Network:
         self.listen_thread = None
         self.host_address = None
         self.connection_lock = threading.Lock()
+        self.recv_thread = None
+        self.discovery_thread = None
+        self.last_received = None
+        self.recv_lock = threading.Lock()
+        self.discovery_sock = None
         
         # Local LAN configuration
         self.port = 12345
@@ -67,6 +72,13 @@ class Network:
 
             self.listen_thread = threading.Thread(target=self._host_listen_loop, daemon=True)
             self.listen_thread.start()
+            # Start discovery responder so clients can find host via UDP broadcast
+            try:
+                if not self.discovery_thread:
+                    self.discovery_thread = threading.Thread(target=self._discovery_responder, daemon=True)
+                    self.discovery_thread.start()
+            except Exception:
+                pass
             return True
         except Exception as e:
             print(f"[HOST ERROR] Failed to host game: {e}")
@@ -99,7 +111,15 @@ class Network:
                         self.connected = True
 
                         response = {"status": "CONNECTED", "role": "HOST"}
-                        conn.send(json.dumps(response).encode())
+                        try:
+                            conn.send(json.dumps(response).encode())
+                        except Exception:
+                            pass
+
+                        # Start non-blocking recv loop for gameplay messages
+                        if not self.recv_thread:
+                            self.recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
+                            self.recv_thread.start()
                         break
                     else:
                         response = {"status": "INVALID_CODE"}
@@ -151,7 +171,13 @@ class Network:
             if response_data.get("status") == "CONNECTED":
                 print(f"[CLIENT] Successfully joined! Room code accepted.")
                 self.connected = True
-                self.client_socket.settimeout(1)
+                # Put socket into short-timeout non-blocking mode
+                self.client_socket.settimeout(0.5)
+
+                # Start recv thread to asynchronously read opponent updates
+                if not self.recv_thread:
+                    self.recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
+                    self.recv_thread.start()
                 return True
             else:
                 print(f"[CLIENT] Join failed: {response_data.get('status')}")
@@ -177,19 +203,115 @@ class Network:
         """Sends gameplay data and receives opponent data."""
         if not self.connected or not self.client_socket:
             return None
-
         try:
-            self.client_socket.send(json.dumps(data).encode())
-
+            # Send our data non-blocking
             try:
-                response = self.client_socket.recv(2048).decode()
-                if response:
-                    return json.loads(response)
-            except socket.timeout:
+                self.client_socket.send(json.dumps(data).encode())
+            except (BrokenPipeError, ConnectionResetError, OSError) as e:
+                print(f"[NETWORK] Send write error: {e}")
+                self.disconnect()
                 return None
+
+            # Return the most recently received packet (if any)
+            with self.recv_lock:
+                if self.last_received is not None:
+                    packet = self.last_received
+                    self.last_received = None
+                    return packet
+            return None
         except Exception as e:
             print(f"[NETWORK] Send error: {e}")
             self.disconnect()
+            return None
+
+    def _recv_loop(self):
+        """Background thread that continuously receives JSON packets and stores the latest."""
+        try:
+            while self.connected and self.client_socket:
+                try:
+                    data = self.client_socket.recv(4096)
+                    if not data:
+                        # Connection closed by peer
+                        print("[NETWORK] Peer closed connection")
+                        self.disconnect()
+                        break
+                    try:
+                        text = data.decode()
+                        parsed = json.loads(text)
+                        with self.recv_lock:
+                            self.last_received = parsed
+                    except Exception as e:
+                        # ignore malformed packets
+                        print(f"[NETWORK] Recv parse error: {e}")
+                except socket.timeout:
+                    continue
+                except (ConnectionResetError, OSError) as e:
+                    print(f"[NETWORK] Recv socket error: {e}")
+                    self.disconnect()
+                    break
+        except Exception as e:
+            print(f"[NETWORK] Recv loop error: {e}")
+
+    # -------------------- LAN Discovery --------------------
+    def _discovery_responder(self):
+        """Host-side UDP responder: replies to discovery broadcasts with host info."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("0.0.0.0", self.port + 1))
+            sock.settimeout(1)
+            self.discovery_sock = sock
+            while self.is_host:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    try:
+                        msg = json.loads(data.decode())
+                    except Exception:
+                        continue
+                    if msg.get("discover") == self.room_code:
+                        resp = {"host_ip": self.get_local_ip(), "port": self.port}
+                        sock.sendto(json.dumps(resp).encode(), addr)
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    print(f"[DISCOVERY] Responder error: {e}")
+                    break
+        except Exception as e:
+            print(f"[DISCOVERY] Responder setup failed: {e}")
+        finally:
+            try:
+                if self.discovery_sock:
+                    self.discovery_sock.close()
+            except Exception:
+                pass
+
+    def discover_host(self, room_code, timeout=2.0):
+        """Client-side LAN discovery: broadcasts room_code and waits for a host reply.
+
+        Returns (host_ip, port) or None.
+        """
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.settimeout(timeout)
+            msg = json.dumps({"discover": str(room_code)}).encode()
+            # Broadcast to the LAN
+            sock.sendto(msg, ("<broadcast>", self.port + 1))
+            start = time.time()
+            while time.time() - start < timeout:
+                try:
+                    data, addr = sock.recvfrom(1024)
+                    try:
+                        resp = json.loads(data.decode())
+                    except Exception:
+                        continue
+                    if resp.get("host_ip") and resp.get("port"):
+                        return resp.get("host_ip"), resp.get("port")
+                except socket.timeout:
+                    continue
+            return None
+        except Exception as e:
+            print(f"[DISCOVERY] Client error: {e}")
             return None
 
     def disconnect(self):
