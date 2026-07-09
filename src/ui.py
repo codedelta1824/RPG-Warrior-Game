@@ -315,7 +315,7 @@ def draw_background_changer_menu(surface, local_index):
     draw_ornate_button(surface, BG_SELECT_BTN, "APPLY BACKGROUND", mouse_pos, FONT)
     draw_ornate_button(surface, BG_BACK_BTN, "SAVE & RETURN", mouse_pos, SMALL_FONT)
 
-def draw_multiplayer_menu(surface, room_code, input_text, is_active, status_msg):
+def draw_multiplayer_menu(surface, room_code, input_text, is_active, allow_input, status_msg):
     pygame.draw.rect(surface, (24, 24, 28), MP_MENU_RECT, border_radius=16)
     pygame.draw.rect(surface, (100, 100, 110), MP_MENU_RECT, width=3, border_radius=16)
 
@@ -324,43 +324,37 @@ def draw_multiplayer_menu(surface, room_code, input_text, is_active, status_msg)
 
     mouse = pygame.mouse.get_pos()
 
-    # Draw ornate buttons for multiplayer menu
     draw_ornate_button(surface, MP_HOST_BTN, "HOST GAME ROOM", mouse, SMALL_FONT)
 
-    # Input box styling - prevent text overflow
-    bg_box = (40, 40, 45) if is_active else (25, 25, 28)
-    border_c = (0, 180, 255) if is_active else (70, 70, 80)
+    input_disabled = not allow_input
+    bg_box = (40, 40, 45) if is_active and allow_input else (25, 25, 28)
+    border_c = (0, 180, 255) if is_active and allow_input else (70, 70, 80)
     pygame.draw.rect(surface, bg_box, MP_INPUT_BOX, border_radius=8)
     pygame.draw.rect(surface, border_c, MP_INPUT_BOX, width=2, border_radius=8)
+    if input_disabled:
+        faded_text = SMALL_FONT.render("LOCKED IN HOST MODE", True, (170, 170, 170))
+        surface.blit(faded_text, (MP_INPUT_BOX.x + 15, MP_INPUT_BOX.centery - faded_text.get_height() // 2))
 
-    # Display input text with clipping to prevent overflow
-    display_text = input_text[:6] if input_text else "ENTER ROOM CODE"  # Limit to 6 digits
-    txt_color = (255, 255, 255) if input_text else (120, 120, 130)
+    display_text = input_text[:6] if input_text and not input_disabled else "ENTER ROOM CODE"
+    txt_color = (255, 255, 255) if input_text and not input_disabled else (120, 120, 130)
     txt_i = FONT.render(display_text, True, txt_color)
-    
-    # Clip the text to fit in the box
+
     max_text_width = MP_INPUT_BOX.width - 30
     if txt_i.get_width() > max_text_width:
         txt_i = pygame.transform.scale(txt_i, (max_text_width, txt_i.get_height()))
-    
     surface.blit(txt_i, (MP_INPUT_BOX.x + 15, MP_INPUT_BOX.centery - txt_i.get_height() // 2))
 
-    # Display room code (BOLD, GOLDEN, positioned above back button)
     if room_code:
-        # Create a bold golden font for the room code
-        code_font = pygame.font.SysFont("Arial", 32, bold=True)
-        code_text = f"ROOM: {room_code}"
-        code_surf = code_font.render(code_text, True, (255, 215, 0))  # Golden color
-        
-        # Position it exactly above the back button
+        code_font = pygame.font.SysFont("Arial", 28, bold=True)
+        code_text = f"ROOM CODE: {room_code}"
+        code_surf = code_font.render(code_text, True, (255, 215, 0))
         code_x = MP_MENU_RECT.centerx - code_surf.get_width() // 2
-        code_y = MP_BACK_BTN.y - code_surf.get_height() - 25
+        code_y = MP_JOIN_BTN.y - code_surf.get_height() - 20
         surface.blit(code_surf, (code_x, code_y))
 
     status_lbl = SMALL_FONT.render(f"STATUS: {status_msg}", True, (0, 255, 255))
     surface.blit(status_lbl, (MP_MENU_RECT.centerx - status_lbl.get_width() // 2, MP_MENU_RECT.y + 340))
 
-    # Draw ornate buttons for join and back
     draw_ornate_button(surface, MP_JOIN_BTN, "JOIN ROOM MATCH", mouse, SMALL_FONT)
     draw_ornate_button(surface, MP_BACK_BTN, "BACK TO MENU", mouse, SMALL_FONT)
 
@@ -459,6 +453,7 @@ class UIManager:
         self.generated_code = ""
         self.inputted_code = ""
         self.active_mp_input = False
+        self.allow_mp_input = True
         self.status_msg = "Select HOST or enter a join code."
         self.selected_avatar_index = 0
         self.avatar_choices = [
@@ -685,27 +680,53 @@ class UIManager:
 
     def _handle_multiplayer_menu_mouse(self, mouse_pos, player1, player2, net):
         if MP_HOST_BTN.collidepoint(mouse_pos):
+            if net.connecting:
+                self.status_msg = "Host is starting. Please wait..."
+                return
             self.mp_role = "HOST"
+            self.allow_mp_input = False
+            self.active_mp_input = False
             self.generated_code = self._generate_room_code()
+            self.inputted_code = ""
+            self.player1_name = "Host (P1)"
+            self.player2_name = "Client (P2)"
             if net.host_game(self.generated_code):
                 self.status_msg = f"Hosting room {self.generated_code}. Waiting for client..."
             else:
+                self.allow_mp_input = True
+                self.mp_role = None
                 self.status_msg = "Failed to host. Check network."
 
         elif MP_INPUT_BOX.collidepoint(mouse_pos):
-            self.active_mp_input = True
-            self.mp_role = "CLIENT"
-            self.player1_name = "Host (P1)"
-            self.player2_name = "Client (P2)"
-            self.status_msg = "Enter 6-digit code. Client on same WiFi."
+            if self.mp_role == "HOST":
+                self.status_msg = "Already hosting. Waiting for client."
+                self.active_mp_input = False
+            elif not self.allow_mp_input:
+                self.status_msg = "Input disabled while host is active."
+                self.active_mp_input = False
+            else:
+                self.active_mp_input = True
+                self.mp_role = "CLIENT"
+                self.player1_name = "Host (P1)"
+                self.player2_name = "Client (P2)"
+                self.status_msg = "Enter 6-digit code. Client on same WiFi."
 
         elif MP_JOIN_BTN.collidepoint(mouse_pos):
-            if self.active_mp_input:
+            if self.mp_role == "HOST":
+                self.status_msg = "Host cannot join its own room. Wait for a client."
+            elif self.active_mp_input:
                 self._attempt_join(player1, player2, net)
             else:
                 self.status_msg = "Click input box first, then enter code."
 
         elif MP_BACK_BTN.collidepoint(mouse_pos):
+            net.disconnect()
+            self.mp_role = None
+            self.generated_code = ""
+            self.inputted_code = ""
+            self.active_mp_input = False
+            self.allow_mp_input = True
+            self.status_msg = "Select HOST to create a room or enter a join code."
             self.state = GameState.MAIN_MENU
 
     def _handle_background_menu_mouse(self, mouse_pos):
@@ -826,7 +847,7 @@ class UIManager:
                     if len(self.player1_name) < 14 and event.unicode.isprintable():
                         self.player1_name += event.unicode
 
-        elif self.state == GameState.MULTIPLAYER_MENU and self.active_mp_input:
+        elif self.state == GameState.MULTIPLAYER_MENU and self.active_mp_input and self.mp_role != "HOST":
             if event.key == pygame.K_BACKSPACE:
                 self.inputted_code = self.inputted_code[:-1]
             elif event.key in [pygame.K_RETURN, pygame.K_KP_ENTER]:
@@ -852,9 +873,15 @@ class UIManager:
             self.status_msg = "Room code must be exactly 6 digits."
             return
 
-        # For local LAN, use localhost. For remote, change to host IP
-        host_ip = "127.0.0.1"  # Change this to the host's IP address for LAN play
-        
+        if net.connecting:
+            self.status_msg = "Already trying to connect. Please wait."
+            return
+
+        if net.connected:
+            self.status_msg = "Already connected to a match."
+            return
+
+        host_ip = "127.0.0.1"
         if net.join_game(self.inputted_code, host_ip=host_ip):
             self._reset_match(player1, player2)
             self.state = GameState.PLAYING
@@ -1147,7 +1174,14 @@ class UIManager:
 
     def _draw_multiplayer_menu(self, surface):
         surface.fill((15, 15, 18))
-        draw_multiplayer_menu(surface, self.generated_code if self.mp_role == "HOST" else "", self.inputted_code, self.active_mp_input, self.status_msg)
+        draw_multiplayer_menu(
+            surface,
+            self.generated_code if self.mp_role == "HOST" else "",
+            self.inputted_code,
+            self.active_mp_input,
+            self.allow_mp_input,
+            self.status_msg
+        )
 
     def _draw_background_menu(self, surface):
         surface.fill((10, 10, 15))
