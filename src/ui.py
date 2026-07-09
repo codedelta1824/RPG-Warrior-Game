@@ -881,7 +881,22 @@ class UIManager:
             self.status_msg = "Already connected to a match."
             return
 
+        # First try LAN discovery (broadcast) to automatically find the host
+        self.status_msg = "Searching LAN for host..."
+        discovery = None
+        try:
+            discovery = net.discover_host(self.inputted_code, timeout=1.0)
+        except Exception:
+            discovery = None
+
         host_ip = "127.0.0.1"
+        if discovery:
+            host_ip = discovery[0]
+            self.status_msg = f"Found host at {host_ip}. Attempting to join..."
+        else:
+            # Fall back to localhost if discovery failed
+            self.status_msg = "Host not found via LAN; trying localhost..."
+
         if net.join_game(self.inputted_code, host_ip=host_ip):
             self._reset_match(player1, player2)
             self.state = GameState.PLAYING
