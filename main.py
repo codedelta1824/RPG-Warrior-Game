@@ -13,7 +13,14 @@ pygame.display.set_caption("Warrior Game")
 
 def main():
     clock = pygame.time.Clock()
-    net = Network()
+    # Prefer ENet (pyenet) if installed for low-latency UDP; otherwise fallback to TCP Network
+    try:
+        from src.enet_net import EnetNetwork
+        net = EnetNetwork()
+        print("Using EnetNetwork (pyenet)")
+    except Exception:
+        net = Network()
+        print("Using fallback TCP Network")
     ui = UIManager()
 
     player1 = Player(300, HEIGHT - 430, side="left")
