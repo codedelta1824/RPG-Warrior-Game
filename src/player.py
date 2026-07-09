@@ -424,9 +424,9 @@ class Player:
         # Prevent stale walking audio
         self._play_walk_audio(moving_on_x and not self.is_jumping and self.y >= self.start_y)
 
-        # FIX: For idle and defend, freeze on first frame. For other states, animate normally
+        # Animate idle and defend properly when multiple frames are available
         if self.state in ["idle", "defend"]:
-            self.frame = 0  # Stay on first frame only
+            self.frame += self.anim_speed
         else:
             self.frame += self.anim_speed
 
@@ -604,16 +604,19 @@ class Bot(Player):
             self.speed = 5
             self.attack_power = 6
             self.ai_aggressiveness = 0.45
+
         elif round_num == 2:
             self.attack_speed = 0.3
             self.speed = 5.75
             self.attack_power = 8
             self.ai_aggressiveness = 0.6
+
         elif round_num == 3:
             self.attack_speed = 0.3
             self.speed = 6.5
             self.attack_power = 10
             self.ai_aggressiveness = 0.72
+
         else:
             self.attack_speed = 0.3
             self.speed = 6.75
@@ -622,6 +625,7 @@ class Bot(Player):
             self.max_health = 200
             self.health = 200
             self.is_boss = True
+            
         self.health = min(self.health, self.max_health)
     
     def update(self, keys, opponent):
